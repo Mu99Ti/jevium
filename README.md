@@ -58,8 +58,6 @@ A run pauses in `waiting_human` for one of these reasons:
 - **C:** confidence is below `JEVIUM_MIN_CONFIDENCE`
 - **D:** the selected target is a payment action
 
-![Jevium pausing at GitHub sign-in for human intervention](docs/demos/hitl.gif)
-
 When the task reaches a login, Jevium pauses in `waiting_human` instead of guessing credentials. The visible Chromium window remains available for the person taking over.
 
 1. Jevium enters `waiting_human`.
