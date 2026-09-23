@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+artifacts/
+*.egg-info/
+
+dist/
+runs/
+.jevium/
+.worktrees/
