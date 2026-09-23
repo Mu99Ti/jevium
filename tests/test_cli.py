@@ -7,7 +7,7 @@ from jevium import cli, planner, verifier
 
 def fresh_env(monkeypatch):
     monkeypatch.setattr(cli, "load_env", lambda: None)
-    monkeypatch.setattr(planner, "plan", lambda task: [task])
+    monkeypatch.setattr(planner, "plan", lambda task=None, **kwargs: [task])
     monkeypatch.setattr(verifier, "verify",
                         lambda *a: {"success": True, "reason": "ok"})
 
@@ -64,6 +64,9 @@ def test_plain_done_exits_zero(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "verdict" in out and "https://x.test/done" in out
+    assert " 1 action  done" in out
+    assert " 1 actions  done" not in out
+    assert "actions   : 1\n" in out
 
 
 def test_plain_blocked_exits_one(monkeypatch):
@@ -116,7 +119,7 @@ def test_summary_lists_fields():
     }
     verdict = {"success": True, "reason": "met"}
     text = "\n".join(cli.summary_lines(state, verdict, max_steps=60))
-    for needle in ("done", "https://final.test/", "3/60", "met", "a"):
+    for needle in ("done", "https://final.test/", "actions   : 3", "met", "a"):
         assert needle in text
 
 

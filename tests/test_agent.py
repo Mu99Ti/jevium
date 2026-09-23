@@ -6,6 +6,7 @@ import time
 from copy import deepcopy
 from unittest.mock import Mock
 
+import httpx
 import pytest
 
 from jevium_core import agent as loop
@@ -73,6 +74,34 @@ def test_one_index_per_node_with_operation_specific_targets():
     assert targets["CLICK"]["1"]["id"] == "e2"
     assert targets["CLICK"]["2"]["id"] == "e3"
     assert "WAIT" in controls
+
+
+def test_post_json_retries_network_errors(monkeypatch):
+    response = httpx.Response(200, json={"ok": True})
+    post = Mock(side_effect=[httpx.ConnectError("temporary"), response])
+    monkeypatch.setattr(model.CLIENT, "post", post)
+    monkeypatch.setattr(model.time, "sleep", lambda _seconds: None)
+    assert model.post_json("https://model.test", "test", {}) == {"ok": True}
+    assert post.call_count == 2
+
+
+def test_loading_only_page_waits_without_model_call(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    post = Mock(side_effect=AssertionError("loading-only page must not call the model"))
+    monkeypatch.setattr(model, "post_json", post)
+    state = {
+        "url": "https://example.test/",
+        "title": "Loading",
+        "text": "",
+        "actions": [{"id": "wait", "kind": "wait", "label": "Wait"}],
+        "fingerprint": "f1",
+    }
+    decision = model.choose(state, "Search for iPhone 18", [])
+    assert decision["operation"] == "WAIT"
+    assert decision["choice"] == "wait"
+    assert decision["confidence"] == 1.0
+    assert decision["human_intervention"] == 0.0
+    post.assert_not_called()
 
 
 def test_all_heads_are_one_request_and_only_matching_head_executes(monkeypatch):
@@ -150,6 +179,16 @@ def test_quoted_task_text_still_uses_the_llm(monkeypatch):
     assert post.call_count == 1
     sent = json.loads(post.call_args.args[2]["messages"][1]["content"])
     assert sent["goal"] == 'Fly from "Zurich" to London'
+
+
+def test_text_helper_accepts_provider_stop_token(monkeypatch):
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "test")
+    monkeypatch.setattr(
+        model,
+        "post_json",
+        Mock(return_value={"choices": [{"message": {"content": '{"text":"Zurich"}<|im_end|>'}}]}),
+    )
+    assert model.field_text({"goal": 'Enter "Zurich"'})[0] == "Zurich"
 
 
 def test_missing_text_credential_stops_before_guessing(monkeypatch):

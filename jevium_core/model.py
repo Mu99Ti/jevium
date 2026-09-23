@@ -17,7 +17,10 @@ def post_json(url, key, body):
         try:
             response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
         except httpx.HTTPError:
-            raise RuntimeError("Model connection failed; no action executed.") from None
+            if attempt == 2:
+                raise RuntimeError("Model connection failed; no action executed.") from None
+            time.sleep(0.5 * 2**attempt)
+            continue
         if response.status_code in {429, 529, 503} and attempt < 2:
             time.sleep(0.5 * 2**attempt)
             continue
@@ -80,6 +83,32 @@ def action_space(actions):
     return elements, targets, controls
 
 
+def _loading_only(actions):
+    return bool(actions) and all(action.get("kind") == "wait" for action in actions)
+
+
+def _loading_decision(operations, choice):
+    operation_probabilities = {key: 0.0 for key in operations}
+    operation_probabilities["WAIT"] = 1.0
+    return {
+        "choice": choice,
+        "operation": "WAIT",
+        "target": None,
+        "target_risk": None,
+        "human_intervention": 0.0,
+        "confidence": 1.0,
+        "probabilities": {choice: 1.0},
+        "operation_probabilities": operation_probabilities,
+        "target_probabilities": {},
+        "target_confidence": None,
+        "raw_answers": {},
+        "model": "loading-fallback",
+        "usage": {},
+        "latency_ms": 0.0,
+        "request": {},
+    }
+
+
 def choose(state, goal, history):
     elements, targets, controls = action_space(state["actions"])
     labels = {
@@ -102,6 +131,8 @@ def choose(state, goal, history):
         DONE="Every requirement is visibly satisfied.",
         BLOCKED="No supported operation can progress.",
     )
+    if _loading_only(state["actions"]):
+        return _loading_decision(operations, controls["WAIT"]["id"])
     questions = {
         "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
     }
@@ -212,7 +243,13 @@ def field_text(context):
         },
     )
     try:
-        output = json.loads(result["choices"][0]["message"]["content"])
+        content = result["choices"][0]["message"]["content"]
+        if isinstance(content, str):
+            content = content.strip()
+            for stop_token in ("<|im_end|>", "<|endoftext|>"):
+                if content.endswith(stop_token):
+                    content = content[:-len(stop_token)].strip()
+        output = json.loads(content)
         value = output["text"]
         if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
             raise ValueError()

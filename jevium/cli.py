@@ -46,14 +46,19 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def summary_lines(state, verdict, max_steps=60):
+def _action_count_text(count):
+    return f"{count} action" if count == 1 else f"{count} actions"
+
+
+def summary_lines(state, verdict, max_steps=None):
     page = state.get("page") or {}
     goals = state.get("plan") or []
+    actions = len(state.get("history") or [])
     return [
         f"status    : {state.get('status')}",
         f"final url : {page.get('url', '')}",
         f"elapsed   : {state.get('elapsed_ms', 0)} ms",
-        f"steps     : {len(state.get('history') or [])}/{max_steps}",
+        f"actions   : {actions}",
         "goals     : " + ("; ".join(goals) if goals else "-"),
         f"verdict   : {verdict.get('success')} — {verdict.get('reason')}",
     ]
@@ -76,8 +81,9 @@ def run_plain(agent, goals, *, max_steps=None):
     try:
         for state in agent.run(on_waiting=on_waiting):
             final = state
-            print(f"{state.get('elapsed_ms', 0):>5} ms  {len(state.get('history') or [])} actions  "
-                  f"{state.get('status')}")
+            actions = len(state.get("history") or [])
+            print(f"{state.get('elapsed_ms', 0):>5} ms  "
+                  f"{_action_count_text(actions)}  {state.get('status')}")
     except ValueError as exc:
         print(f"jevium: {exc}", file=sys.stderr)
         return 1
@@ -89,7 +95,7 @@ def run_plain(agent, goals, *, max_steps=None):
     else:
         verdict = {"success": None, "reason": f"run ended {final.get('status')}; not verified."}
     print()
-    for line in summary_lines(final, verdict, max_steps=max_steps or 60):
+    for line in summary_lines(final, verdict):
         print(line)
     return 0 if final.get("status") == "done" else 1
 
@@ -132,7 +138,7 @@ def main(argv=None) -> int:
     if args.record:
         record_dir = Path("runs") / time.strftime("%Y%m%d-%H%M%S")
 
-    goals = planner.plan(args.task)
+    goals = planner.plan(args.task, url=args.url)
 
     def create_agent():
         try:

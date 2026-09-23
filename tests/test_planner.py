@@ -19,6 +19,22 @@ def test_chat_json_parses_strict_object(monkeypatch):
     assert llm.chat_json("sys", "user") == '{"goals":["a"]}'
 
 
+def test_plan_includes_url_context(monkeypatch):
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "test")
+    prompts = []
+
+    def capture(_system, user, _model=None):
+        prompts.append(json.loads(user))
+        return json.dumps({"goals": ["Use the current site search"]})
+
+    monkeypatch.setattr(llm, "chat_json", capture)
+    goals = planner.plan("search for iphone 18", url="https://digikala.com")
+    assert goals == ["Use the current site search"]
+    assert prompts == [
+        {"task": "search for iphone 18", "url": "https://digikala.com"}
+    ]
+
+
 def test_plan_validates_and_strips(monkeypatch):
     monkeypatch.setenv("TEXT_MODEL_API_KEY", "test")
     payload = json.dumps({"goals": [" Open page ", "Click buy", "", "x"]})
