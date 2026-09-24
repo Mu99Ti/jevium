@@ -8,7 +8,7 @@ import time
 from functools import partial
 from pathlib import Path
 
-from jevium_core import Agent
+from jevium_core import Agent, replay
 from jevium_core.model import task_contains_configured_secret
 
 from . import planner, verifier
@@ -44,6 +44,8 @@ def parse_args(argv=None):
     run.add_argument("--plain", action="store_true", help="Line logs instead of the TUI.")
     run.add_argument("--backend", choices=("chromium", "harness"), default="chromium")
     run.add_argument("--max-steps", type=int, default=None)
+    run.add_argument("--replay", metavar="STEPS", default=None,
+                     help="Replay a recorded steps.jsonl without model calls.")
     return p.parse_args(argv)
 
 
@@ -102,6 +104,17 @@ def run_plain(agent, goals, *, max_steps=None):
     return 0 if final.get("status") == "done" else 1
 
 
+def _start_browser(args, profile):
+    if args.backend == "chromium":
+        try:
+            from jevium_core import chromium
+        except ImportError as exc:
+            raise RuntimeError(f"playwright is not installed ({exc}); run: uv sync") from None
+        return chromium.Browser(args.url, headless=args.headless, profile=profile)
+    from jevium_core.browser import Browser
+    return Browser(args.url)
+
+
 def main(argv=None) -> int:
     try:
         load_env()
@@ -110,7 +123,7 @@ def main(argv=None) -> int:
         # argparse: --help exits 0 (must stay 0), errors exit 2.
         return int(exc.code) if exc.code is not None else 2
 
-    if not os.environ.get("TYPESAFE_API_KEY"):
+    if not args.replay and not os.environ.get("TYPESAFE_API_KEY"):
         print("jevium: TYPESAFE_API_KEY is required.", file=sys.stderr)
         return 2
     if not args.task.strip():
@@ -119,7 +132,7 @@ def main(argv=None) -> int:
     if task_contains_configured_secret(args.task):
         print("jevium: remove secrets from --task; put them in .env.", file=sys.stderr)
         return 2
-    if not os.environ.get("TEXT_MODEL_API_KEY"):
+    if not args.replay and not os.environ.get("TEXT_MODEL_API_KEY"):
         print("jevium: warning: no TEXT_MODEL_API_KEY — TYPE_TEXT will abort at the first fill; "
               "planner/verifier skipped.", file=sys.stderr)
 
@@ -142,6 +155,36 @@ def main(argv=None) -> int:
     record_dir = None
     if args.record:
         record_dir = Path("runs") / time.strftime("%Y%m%d-%H%M%S")
+
+    if args.replay:
+        if args.record:
+            print("jevium: --record cannot be combined with --replay.", file=sys.stderr)
+            return 2
+        try:
+            steps = replay.load_steps(args.replay)
+        except (OSError, ValueError) as exc:
+            print(f"jevium: {exc}", file=sys.stderr)
+            return 2
+        try:
+            browser = _start_browser(args, profile)
+        except RuntimeError as exc:
+            print(f"jevium: {exc}", file=sys.stderr)
+            return 2
+        try:
+            result = replay.replay(browser, steps)
+        except replay.ReplayDrift as exc:
+            print(f"jevium: replay drifted at step {exc.index}: {exc.reason} (at {exc.url})",
+                  file=sys.stderr)
+            return 1
+        finally:
+            browser.close()
+        state = {"status": "done", "page": result["final_page"], "elapsed_ms": 0,
+                 "history": result["history"], "plan": [args.task]}
+        verdict = {"success": None, "reason": "replay completed; verification not configured."}
+        print()
+        for line in summary_lines(state, verdict):
+            print(line)
+        return 0
 
     goals = planner.plan(args.task, url=args.url)
 

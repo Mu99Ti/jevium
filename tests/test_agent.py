@@ -998,3 +998,24 @@ def test_resume_settle_failure_yields_waiting_state(runner, monkeypatch):
     assert state["waiting"]["reason"] == (
         "Page did not settle after resume. Check the browser, then try again."
     )
+
+
+def test_history_records_locator_hint(runner):
+    runner.state["decision"] = decision("e3")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["history"][-1]["locator"] == {
+        "kind": "click", "role": "button", "name": "Go", "nth": 0,
+    }
+
+
+def test_secret_fill_records_secret_kind(runner, monkeypatch):
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    runner.state["page"] = login_page()
+    runner.state["decision"] = {
+        **decision("p1"), "operation": "TYPE_SECRET", "target": "2",
+        "target_risk": "credential", "model": "configured-fallback",
+    }
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    loc = runner.state["history"][-1]["locator"]
+    assert loc == {"kind": "fill", "role": "textbox", "name": "Password",
+                   "nth": 0, "secret": "password"}

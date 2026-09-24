@@ -49,6 +49,7 @@ def test_login_and_card_secrets_are_masked():
         assert by_label["Username"]["secret"] == "username"
         assert by_label["Username"]["value"] == ""
         assert by_label["Username"].get("login_form") is True
+        assert by_label["Username"]["testid"] == "user-field"
         assert by_label["Password"]["secret"] == "password"
         assert by_label["Password"]["risk"] == "credential"
         assert by_label["Password"]["value"] == ""
@@ -59,5 +60,17 @@ def test_login_and_card_secrets_are_masked():
         assert by_label["CVC"]["risk"] == "card_cvv"
         assert by_label["Sign in"].get("login_form") is True
         assert by_label["Pay now"]["risk"] == "pay"
+    finally:
+        browser.close()
+
+
+def test_actions_without_testid_omit_the_field():
+    try:
+        browser = chromium.Browser(RISK_PAGE, headless=True)
+    except Exception as exc:
+        pytest.skip(f"chromium unavailable: {exc}")
+    try:
+        state = browser.observe(screenshot=False)
+        assert all("testid" not in a for a in state["actions"])
     finally:
         browser.close()

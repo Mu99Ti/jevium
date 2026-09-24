@@ -83,6 +83,7 @@ jevium run --url <URL> --task '<goal>' \
 - `--record`: save screenshots and `steps.jsonl` under `runs/<timestamp>/`
 - `--backend chromium|harness`: default is self-managed Chromium
 - `--max-steps N`: browser mutation budget; default comes from the agent
+- `--replay <steps.jsonl>`: replay a recorded run deterministically, without model calls
 
 Exit codes: `0` done, `1` blocked or failed, `2` usage/config error, `130` interrupt.
 

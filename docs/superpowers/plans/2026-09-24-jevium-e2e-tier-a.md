@@ -70,7 +70,7 @@ Expected: push reports `688c3cb..<new-sha> main -> main`.
   - CLI: `run --replay STEPS.jsonl` implies plain mode; skips the `TYPESAFE_API_KEY` requirement, the planner, the text-key warning, and the TUI; rejects `--record` with exit2; drift → exit1; load errors → exit2.
   - History entries gain `"locator": {...}`; snapshot actions gain `"testid"` only when `data-testid` exists.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/pages/login.html` — change the username input line to:
 
@@ -347,7 +347,7 @@ def test_replay_missing_file_exits_2_before_browser(monkeypatch, tmp_path):
 - `--replay <steps.jsonl>`: replay a recorded run deterministically, without model calls
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run:
 
@@ -358,7 +358,7 @@ uv run pytest -q tests/test_chromium_live.py::test_login_and_card_secrets_are_ma
 
 Expected: first command FAILS — `ModuleNotFoundError: No module named 'jevium_core.replay'` plus the two new agent locator tests and the replay CLI tests. Second command FAILS with `KeyError: 'testid'` (if it reports SKIP, run `uv run playwright install chromium` and require FAIL).
 
-- [ ] **Step 3: Implement `jevium_core/replay.py`**
+- [x] **Step 3: Implement `jevium_core/replay.py`**
 
 Create the module:
 
@@ -532,7 +532,7 @@ def replay(browser, steps):
     return {"status": "done", "history": history, "final_page": final_page}
 ```
 
-- [ ] **Step 4: Implement snapshot `testid`, agent locator recording, and CLI replay**
+- [x] **Step 4: Implement snapshot `testid`, agent locator recording, and CLI replay**
 
 `jevium_core/snapshot.js` — in the action loop, right after `if (secret) base.secret = secret;` add:
 
@@ -634,7 +634,7 @@ def _start_browser(args, profile):
         return 0
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run:
 
@@ -645,13 +645,13 @@ node --check jevium_core/snapshot.js
 
 Expected: PASS.
 
-- [ ] **Step 6: Run the full suite and linter**
+- [x] **Step 6: Run the full suite and linter**
 
 Run: `uv run ruff check . && uv run pytest -q && node --check jevium_core/snapshot.js`
 
 Expected: clean and fully green.
 
-- [ ] **Step 7: Tick Task1 checkboxes, commit, push**
+- [x] **Step 7: Tick Task1 checkboxes, commit, push**
 
 Tick this task's `- [ ]` boxes to `- [x]`, then:
 

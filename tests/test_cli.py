@@ -238,6 +238,65 @@ def test_prompt_resume_copy(monkeypatch, capsys):
                        "then press Enter to mark it done and continue... "]
 
 
+def _replay_cli_setup(monkeypatch, tmp_path, body='{"step":1,"kind":"click","choice":"e3"}\n'):
+    import jevium_core.chromium as chromium_mod
+    import jevium_core.replay as replay_mod
+
+    fresh_env(monkeypatch)
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setattr(planner, "plan", Mock(side_effect=AssertionError("planner must not run")))
+    browser = Mock()
+    browser_factory = Mock(return_value=browser)
+    monkeypatch.setattr(chromium_mod, "Browser", browser_factory)
+    steps = tmp_path / "steps.jsonl"
+    steps.write_text(body)
+    return replay_mod, browser_factory, browser, steps
+
+
+def test_replay_runs_without_model_key(monkeypatch, tmp_path):
+    replay_mod, _factory, browser, steps = _replay_cli_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(replay_mod, "replay", Mock(return_value={
+        "status": "done",
+        "history": [{"step": 1, "kind": "click", "action": "Go",
+                     "url": "https://x.test/done"}],
+        "final_page": {"url": "https://x.test/done", "title": "D", "text": ""},
+    }))
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(steps), "--plain"])
+    assert code == 0
+    replay_mod.replay.assert_called_once()
+    browser.close.assert_called_once()
+
+
+def test_replay_with_record_exits_2(monkeypatch, tmp_path):
+    _replay, browser_factory, _browser, steps = _replay_cli_setup(monkeypatch, tmp_path)
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(steps), "--record", "--plain"])
+    assert code == 2
+    browser_factory.assert_not_called()
+
+
+def test_replay_drift_exits_1(monkeypatch, tmp_path, capsys):
+    replay_mod, _factory, _browser, steps = _replay_cli_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(replay_mod, "replay", Mock(
+        side_effect=replay_mod.ReplayDrift(3, "button 'Go' not found", "https://x.test/step")))
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(steps), "--plain"])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "replay drifted at step 3" in err
+    assert "button 'Go' not found" in err
+    assert "https://x.test/step" in err
+
+
+def test_replay_missing_file_exits_2_before_browser(monkeypatch, tmp_path):
+    _replay, browser_factory, _browser, _steps = _replay_cli_setup(monkeypatch, tmp_path)
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(tmp_path / "nope.jsonl"), "--plain"])
+    assert code == 2
+    browser_factory.assert_not_called()
+
+
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):
     fresh_env(monkeypatch)
     monkeypatch.setenv("TYPESAFE_API_KEY", "k")

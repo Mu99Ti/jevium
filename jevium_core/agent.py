@@ -10,6 +10,7 @@ from pathlib import Path
 from .browser import Browser, StalePage
 from .model import REQUIRED_SECRETS, action_space, choose, configured_secret, field_context, field_text
 from .questions import MAX_STEPS
+from .replay import locator_for
 
 GATE_REASONS = {
     "model": "The model asked for human intervention (NEEDS_HUMAN).",
@@ -210,6 +211,7 @@ class Agent:
                     "step": len(state["history"]) + 1,
                     "action": action["label"],
                     "kind": action["kind"],
+                    "locator": locator_for(action, page["actions"]),
                     "choice": selected,
                     "probability": decision["probabilities"][selected],
                     "confidence": decision["confidence"],

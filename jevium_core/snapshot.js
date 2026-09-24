@@ -107,6 +107,8 @@
     const base={node:identity(e),role:rname,label:name(e)||rname,
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     if (secret) base.secret = secret;
+    const testid = e.getAttribute('data-testid');
+    if (testid) base.testid = testid;
     if (loginForms.has(e.form || loginRoot(e))) base.login_form = true;
     const risk = riskOf(e, secret);
     if (risk) base.risk = risk;
