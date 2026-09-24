@@ -292,3 +292,30 @@ def test_request_stop_sets_flag_and_resumes():
     app._request_stop()
     assert app._stopped is True
     assert FakeAgent.resumed == 1
+
+
+def test_finish_renders_export_when_done(tmp_path, monkeypatch):
+    from unittest.mock import Mock as _Mock
+    monkeypatch.setattr(tui.verifier, "verify",
+                        lambda *a, **k: {"success": True, "reason": "ok", "checks": []})
+    target = tmp_path / "out" / "flow.spec.ts"
+    app = tui.JeviumApp(lambda: None, goals=["t"], max_steps=60,
+                        export_path=str(target), start_url="https://x.test/")
+    app.run_worker = lambda *args, **kwargs: None
+    app.exit = _Mock()
+    state = {
+        "status": "done", "elapsed_ms": 10,
+        "history": [{"step": 1, "action": "Go", "kind": "click", "text": None,
+                     "url": "https://x.test/done",
+                     "locator": {"kind": "click", "role": "button", "name": "Go", "nth": 0}}],
+        "page": {"url": "https://x.test/done", "title": "Done", "text": "done"},
+        "waiting": None, "plan": ["t"],
+    }
+
+    async def finish():
+        async with app.run_test(size=(80, 24)):
+            app._finish(state)
+
+    asyncio.run(finish())
+    assert target.exists()
+    assert 'page.getByRole("button", { name: "Go" })' in target.read_text()

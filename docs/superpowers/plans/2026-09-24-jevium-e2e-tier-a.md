@@ -887,7 +887,7 @@ git push origin main
 - Produces: `export_test.render_playwright_test(*, task: str, start_url: str, history: list[dict], final_page: dict) -> str`.
 - CLI/TUI flag `--export-test PATH`. Export runs only when `status == "done"`; otherwise stderr `jevium: export skipped: run did not complete` and the original exit code is preserved. Secret steps emit `process.env.<VAR>!` and never a literal. `run_plain`/`run_tui`/`JeviumApp` gain `report_path` parameters in this task but wire them only in Task 4.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_export_test.py`:
 
@@ -1055,7 +1055,7 @@ def test_finish_renders_export_when_done(tmp_path, monkeypatch):
 - `--export-test <path.spec.ts>`: write a deterministic Playwright Test from a completed run or replay
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1066,7 +1066,7 @@ uv run pytest -q tests/test_cli.py -k export
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'jevium_core.export_test'`; TUI `TypeError: __init__() got an unexpected keyword argument 'export_path'`; CLI file-not-created / missing skip notice.
 
-- [ ] **Step 3: Implement export rendering and wiring**
+- [x] **Step 3: Implement export rendering and wiring**
 
 Create `jevium_core/export_test.py`:
 
@@ -1221,13 +1221,13 @@ def run_plain(agent, goals, *, max_steps=None, export_path=None, report_path=Non
                 log.write("jevium: export skipped: run did not complete")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run ruff check . && uv run pytest -q`
 
 Expected: full suite green (export render tests, CLI export tests, TUI finish test, updated `fake_run_tui`).
 
-- [ ] **Step 5: Tick Task3 checkboxes, commit, push**
+- [x] **Step 5: Tick Task3 checkboxes, commit, push**
 
 ```bash
 git add jevium_core/export_test.py tests/test_export_test.py jevium/cli.py jevium/tui.py tests/test_cli.py tests/test_tui.py README.md

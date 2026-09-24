@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 
 from jevium_core import Agent, replay
+from jevium_core.export_test import render_playwright_test
 from jevium_core.model import task_contains_configured_secret
 
 from . import planner, verifier
@@ -46,6 +47,8 @@ def parse_args(argv=None):
     run.add_argument("--max-steps", type=int, default=None)
     run.add_argument("--replay", metavar="STEPS", default=None,
                      help="Replay a recorded steps.jsonl without model calls.")
+    run.add_argument("--export-test", metavar="PATH", default=None,
+                     help="Write a Playwright Test spec after a completed run.")
     return p.parse_args(argv)
 
 
@@ -75,7 +78,7 @@ def _prompt_resume(reason: str):
         raise RuntimeError("stdin closed while waiting for human; resume was not sent.") from None
 
 
-def run_plain(agent, goals, *, max_steps=None):
+def run_plain(agent, goals, *, max_steps=None, export_path=None, report_path=None, start_url=None):
     def on_waiting(waiting):
         _prompt_resume(waiting.get("reason", "Human intervention required."))
         agent.resume()
@@ -101,6 +104,21 @@ def run_plain(agent, goals, *, max_steps=None):
     print()
     for line in summary_lines(final, verdict):
         print(line)
+    if export_path:
+        if final.get("status") == "done":
+            try:
+                path = Path(export_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(render_playwright_test(
+                    task="; ".join(str(g) for g in goals),
+                    start_url=start_url or "",
+                    history=final.get("history") or [],
+                    final_page=final.get("page") or {},
+                ))
+            except OSError as exc:
+                print(f"jevium: export failed: {exc}", file=sys.stderr)
+        else:
+            print("jevium: export skipped: run did not complete", file=sys.stderr)
     return 0 if final.get("status") == "done" else 1
 
 
@@ -184,6 +202,16 @@ def main(argv=None) -> int:
             [args.task], result["final_page"], result["history"],
             expected_url=steps[-1].get("url"),
         )
+        if args.export_test:
+            try:
+                path = Path(args.export_test)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(render_playwright_test(
+                    task=args.task, start_url=args.url,
+                    history=result["history"], final_page=result["final_page"],
+                ))
+            except OSError as exc:
+                print(f"jevium: export failed: {exc}", file=sys.stderr)
         print()
         for line in summary_lines(state, verdict):
             print(line)
@@ -207,7 +235,8 @@ def main(argv=None) -> int:
 
     if not args.plain and sys.stdin.isatty() and sys.stdout.isatty():
         from .tui import run_tui
-        return run_tui(create_agent, goals=goals, max_steps=args.max_steps)
+        return run_tui(create_agent, goals=goals, max_steps=args.max_steps,
+                       export_path=args.export_test, start_url=args.url)
 
     try:
         agent = create_agent()
@@ -217,7 +246,8 @@ def main(argv=None) -> int:
 
     try:
         with agent:
-            return run_plain(agent, goals, max_steps=args.max_steps)
+            return run_plain(agent, goals, max_steps=args.max_steps,
+                             export_path=args.export_test, start_url=args.url)
     except KeyboardInterrupt:
         print("\njevium: interrupted.", file=sys.stderr)
         return 130

@@ -1,8 +1,12 @@
 """Live inspector for a jevium run: agent state, active step, log, and HITL banner."""
 
+from pathlib import Path
+
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, RichLog, Static
+
+from jevium_core.export_test import render_playwright_test
 
 from . import verifier
 from .cli import summary_lines
@@ -277,12 +281,16 @@ class JeviumApp(App):
     }
     """
 
-    def __init__(self, agent_factory, *, goals, max_steps=None):
+    def __init__(self, agent_factory, *, goals, max_steps=None,
+                 export_path=None, start_url=None, report_path=None):
         super().__init__()
         self.agent_factory = agent_factory
         self.agent = None
         self.goals = goals
         self.max_steps = max_steps or 60
+        self.export_path = export_path
+        self.start_url = start_url
+        self.report_path = report_path
         self.exit_code = 1
         self._stopped = False
         self._logged_steps = 0
@@ -452,11 +460,28 @@ class JeviumApp(App):
         log.write("--- summary ---")
         for line in summary_lines(final, verdict):
             log.write(line)
+        if self.export_path:
+            if final.get("status") == "done":
+                try:
+                    target = Path(self.export_path)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(render_playwright_test(
+                        task="; ".join(str(g) for g in self.goals),
+                        start_url=self.start_url or "",
+                        history=final.get("history") or [],
+                        final_page=final.get("page") or {},
+                    ))
+                except OSError as exc:
+                    log.write(f"jevium: export failed: {exc}")
+            else:
+                log.write("jevium: export skipped: run did not complete")
         self.exit_code = 0 if final.get("status") == "done" else 1
         self.exit(self.exit_code)
 
 
-def run_tui(agent_factory, *, goals, max_steps=None) -> int:
-    app = JeviumApp(agent_factory, goals=goals, max_steps=max_steps)
+def run_tui(agent_factory, *, goals, max_steps=None,
+            export_path=None, start_url=None, report_path=None) -> int:
+    app = JeviumApp(agent_factory, goals=goals, max_steps=max_steps,
+                    export_path=export_path, start_url=start_url, report_path=report_path)
     result = app.run()
     return int(result) if isinstance(result, int) else app.exit_code

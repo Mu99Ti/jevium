@@ -171,7 +171,7 @@ def test_tui_defers_agent_creation_until_tui_worker(monkeypatch):
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
 
-    def fake_run_tui(agent_factory, *, goals, max_steps=None):
+    def fake_run_tui(agent_factory, *, goals, max_steps=None, **_kw):
         assert callable(agent_factory)
         assert created == []
         return 0
@@ -330,6 +330,51 @@ def test_replay_verdict_false_exits_1(monkeypatch, tmp_path):
     code = cli.main(["run", "--url", "https://x.test", "--task", "t",
                      "--replay", str(steps), "--plain"])
     assert code == 1
+
+
+def test_export_test_written_on_done(monkeypatch, tmp_path):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    class Exportable(FakeAgent):
+        def run(self, on_waiting=None):
+            yield {
+                "status": "done", "elapsed_ms": 10, "history": [{
+                    "step": 1, "action": "Click Go", "kind": "click", "text": None,
+                    "url": "https://x.test/done",
+                    "locator": {"kind": "click", "role": "button", "name": "Go", "nth": 0},
+                }],
+                "page": {"url": "https://x.test/done", "title": "Done", "text": "done"},
+                "waiting": None, "plan": ["t"],
+            }
+
+    monkeypatch.setattr(cli, "Agent", Exportable)
+    out = tmp_path / "specs" / "flow.spec.ts"
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--plain", "--export-test", str(out)])
+    assert code == 0
+    text = out.read_text()
+    assert 'page.getByRole("button", { name: "Go" })' in text
+    assert 'await page.goto("https://x.test");' in text
+
+
+def test_export_skipped_when_not_done(monkeypatch, tmp_path, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    class Blocked(FakeAgent):
+        def run(self, on_waiting=None):
+            yield {"status": "blocked", "elapsed_ms": 5, "history": [],
+                   "page": {"url": "https://x.test/", "title": "t", "text": ""},
+                   "waiting": None, "plan": ["t"]}
+
+    monkeypatch.setattr(cli, "Agent", Blocked)
+    out = tmp_path / "flow.spec.ts"
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--plain", "--export-test", str(out)])
+    assert code == 1
+    assert not out.exists()
+    assert "export skipped" in capsys.readouterr().err
 
 
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):

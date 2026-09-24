@@ -84,6 +84,7 @@ jevium run --url <URL> --task '<goal>' \
 - `--backend chromium|harness`: default is self-managed Chromium
 - `--max-steps N`: browser mutation budget; default comes from the agent
 - `--replay <steps.jsonl>`: replay a recorded run deterministically, without model calls
+- `--export-test <path.spec.ts>`: write a deterministic Playwright Test from a completed run or replay
 
 Exit codes: `0` done, `1` blocked or failed, `2` usage/config error, `130` interrupt.
 
