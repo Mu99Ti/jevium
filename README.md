@@ -74,7 +74,8 @@ Configure login and card values in git-ignored `.env` (`JEVIUM_USERNAME`, `JEVIU
 ```bash
 jevium run --url <URL> --task '<goal>' \
   [--plain] [--headless] [--profile <name>] [--record] \
-  [--backend chromium|harness] [--max-steps N]
+  [--backend chromium|harness] [--max-steps N] [--wait-idle] \
+  [--replay <steps.jsonl>] [--export-test <path.spec.ts>] [--report <path.json|path.xml>]
 ```
 
 - `--plain`: line logs instead of the TUI
@@ -91,6 +92,32 @@ jevium run --url <URL> --task '<goal>' \
 
 Exit codes: `0` done, `1` blocked or failed, `2` usage/config error, `130` interrupt.
 
+## E2E testing
+
+Author a flow once with the model, then replay it without one:
+
+```bash
+# 1) Record a successful run → runs/<timestamp>/steps.jsonl
+uv run jevium run --plain --record --url https://example.com --task 'Search for boots'
+
+# 2) Replay later with zero model calls; exit 1 names the step where the page drifted
+uv run jevium run --plain --url https://example.com --task 'Search for boots' \
+  --replay runs/<timestamp>/steps.jsonl
+
+# 3) Export a deterministic Playwright Test from a run or a replay
+uv run jevium run --plain --url https://example.com --task 'Search for boots' \
+  --export-test tests/e2e/boots.spec.ts
+
+# 4) CI report — JSON or JUnit XML, chosen by the suffix
+uv run jevium run --plain --url https://example.com --task 'Search for boots' \
+  --report out/report.json
+```
+
+- Replay re-finds each recorded element by `data-testid`, then `role` + accessible name + `nth`, and aborts on the first mismatch with failure artifacts (`drift.json`, plus the files listed under CLI).
+- `--replay` needs no `TYPESAFE_API_KEY`; its verdict is the recorded final URL (the text verifier runs too when `TEXT_MODEL_API_KEY` is set).
+- Exported specs assert the final URL and title and reference secrets only as `process.env.JEVIUM_*` — run them with `npx playwright test` in a project that has `@playwright/test`, exporting the same `.env` values.
+- `--report` files are written even when the run fails, so CI can archive them next to the artifacts.
+
 ## Environment
 
 ```bash
@@ -99,8 +126,8 @@ cp .env.example .env
 
 Required:
 
-- `TYPESAFE_API_KEY`
-- `TEXT_MODEL_API_KEY` for `TYPE_TEXT`, planner, and verifier
+- `TYPESAFE_API_KEY` for live runs (not needed for `--replay`)
+- `TEXT_MODEL_API_KEY` for `TYPE_TEXT`, planner, and verifier (optional for `--replay`)
 
 Defaults and optional overrides:
 
