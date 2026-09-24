@@ -1,6 +1,7 @@
 # Jevium README: Jev + Chromium Design
 
-**Date:** 2026-09-23  
+**Date:** 2026-09-23
+
 **Status:** Approved design for implementation
 
 ## Goal

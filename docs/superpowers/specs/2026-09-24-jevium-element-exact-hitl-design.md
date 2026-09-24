@@ -1,7 +1,9 @@
 # Jevium Element-Exact HITL and Resume Design
 
-**Date:** 2026-09-24  
-**Status:** Approved by the user's "go ahead by your recommendations" instruction  
+**Date:** 2026-09-24
+
+**Status:** Approved by the user's "go ahead by your recommendations" instruction
+
 **Supersedes:** runtime behavior claims in `2026-09-23-jevium-hitl-readme-design.md`
 
 ## Goal

@@ -1,6 +1,7 @@
 # Jevium HITL README Design
 
-**Date:** 2026-09-23  
+**Date:** 2026-09-23
+
 **Status:** Superseded for runtime behavior by `2026-09-24-jevium-element-exact-hitl-design.md`; historical documentation-only design
 
 ## Goal
