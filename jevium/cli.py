@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 
 from jevium_core import Agent
+from jevium_core.model import task_contains_configured_secret
 
 from . import planner, verifier
 
@@ -67,15 +68,16 @@ def summary_lines(state, verdict, max_steps=None):
 def _prompt_resume(reason: str):
     print(f"\n[waiting for human] {reason}", file=sys.stderr)
     try:
-        input("Complete the step in the browser, then press Enter to resume... ")
+        input("Complete this step in the browser, then press Enter to mark it done and continue... ")
     except EOFError:
-        pass
+        raise RuntimeError("stdin closed while waiting for human; resume was not sent.") from None
 
 
 def run_plain(agent, goals, *, max_steps=None):
     def on_waiting(waiting):
         _prompt_resume(waiting.get("reason", "Human intervention required."))
         agent.resume()
+        print("[human step marked done] rechecking page and continuing...", file=sys.stderr)
 
     final = None
     try:
@@ -113,6 +115,9 @@ def main(argv=None) -> int:
         return 2
     if not args.task.strip():
         print("jevium: --task must not be empty.", file=sys.stderr)
+        return 2
+    if task_contains_configured_secret(args.task):
+        print("jevium: remove secrets from --task; put them in .env.", file=sys.stderr)
         return 2
     if not os.environ.get("TEXT_MODEL_API_KEY"):
         print("jevium: warning: no TEXT_MODEL_API_KEY — TYPE_TEXT will abort at the first fill; "

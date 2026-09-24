@@ -129,7 +129,7 @@ def test_render_hides_hitl_controls_when_running():
     asyncio.run(render())
 
 
-def test_resume_button_hides_banner_and_signals_agent():
+def test_done_resume_shows_recheck_feedback_then_hides():
     class FakeAgent:
         calls = 0
 
@@ -139,10 +139,11 @@ def test_resume_button_hides_banner_and_signals_agent():
     app = tui.JeviumApp(lambda: FakeAgent(), goals=["g"], max_steps=60)
     app.agent = FakeAgent()
     app.run_worker = lambda *args, **kwargs: None
-    state = {
+    waiting_state = {
         "status": "waiting_human",
         "decision": None,
-        "waiting": {"reason": "Payment confirmation"},
+        "waiting": {"reason": "The selected target is a payment action. Confirm it, then resume. Element: Go.",
+                    "element": {"label": "Go", "risk": "pay", "operation": "CLICK", "target": "3"}},
         "elements": [],
         "page": {"url": "https://example.test", "title": "Example", "actions": []},
         "history": [],
@@ -150,16 +151,58 @@ def test_resume_button_hides_banner_and_signals_agent():
         "plan": ["g"],
     }
 
-    async def click_resume():
+    async def flow():
+        async with app.run_test(size=(80, 24)) as pilot:
+            app._render(waiting_state)
+            await pilot.pause()
+            resume = app.query_one("#resume", Button)
+            assert str(resume.label) == "Done — resume"
+            await pilot.click("#resume")
+            assert FakeAgent.calls == 1
+            banner = app.query_one("#banner")
+            assert banner.has_class("visible")
+            assert resume.display
+            assert resume.disabled
+            message = str(app.query_one("#banner-message").render())
+            assert "Marked done" in message and "rechecking" in message
+            assert "Marked done" in str(app.query_one("#active").render())
+            log_lines = [str(line) for line in app.query_one("#log").lines]
+            assert any("Marked done" in line for line in log_lines)
+
+            running_state = {**waiting_state, "status": "predicted", "waiting": None}
+            app._render(running_state)
+            await pilot.pause()
+            assert not banner.has_class("visible")
+            assert not resume.display
+            assert not resume.disabled
+
+    asyncio.run(flow())
+
+
+def test_waiting_render_reenables_done_button_after_settle_failure():
+    app = tui.JeviumApp(lambda: None, goals=["g"], max_steps=60)
+    app.run_worker = lambda *args, **kwargs: None
+    state = {
+        "status": "waiting_human",
+        "decision": None,
+        "waiting": {"reason": "Page did not settle after resume. Check the browser, then try again.",
+                    "element": None},
+        "elements": [],
+        "page": {"url": "https://example.test", "title": "Example", "actions": []},
+        "history": [],
+        "elapsed_ms": 0,
+        "plan": ["g"],
+    }
+
+    async def flow():
         async with app.run_test(size=(80, 24)) as pilot:
             app._render(state)
             await pilot.pause()
-            await pilot.click("#resume")
-            assert FakeAgent.calls == 1
-            assert not app.query_one("#banner").has_class("visible")
-            assert not app.query_one("#resume").display
+            resume = app.query_one("#resume", Button)
+            assert resume.display and not resume.disabled
+            assert "did not settle" in str(app.query_one("#banner-message").render())
 
-    asyncio.run(click_resume())
+    asyncio.run(flow())
 
 
 def test_active_line_reports_running_step():

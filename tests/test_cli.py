@@ -1,6 +1,7 @@
 """CLI contracts: startup validation, exit codes, summary. No browsers, no APIs."""
 
 import threading
+from unittest.mock import Mock
 
 from jevium import cli, planner, verifier
 
@@ -178,6 +179,63 @@ def test_tui_defers_agent_creation_until_tui_worker(monkeypatch):
     monkeypatch.setattr(tui, "run_tui", fake_run_tui)
     assert cli.main(["run", "--url", "https://x.test", "--task", "t"]) == 0
     assert created == []
+
+
+def test_plain_eof_does_not_resume(monkeypatch, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    class Waiting(FakeAgent):
+        resumed = False
+
+        def run(self, on_waiting=None):
+            yield {
+                "status": "waiting_human", "elapsed_ms": 10, "history": [],
+                "page": {"url": "u", "title": "t", "text": ""},
+                "waiting": {"trigger": "pay", "reason": "pay reason",
+                            "element": {"label": "Pay now"}},
+                "plan": ["t"],
+            }
+            on_waiting({"trigger": "pay", "reason": "pay reason"})
+            return  # old code resumes on EOF and ends here; new code raises inside on_waiting
+
+        def resume(self):
+            type(self).resumed = True
+
+    def eof(_prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr(cli, "Agent", Waiting)
+    monkeypatch.setattr("builtins.input", eof)
+    assert cli.main(["run", "--url", "https://x.test", "--task", "t", "--plain"]) == 1
+    assert Waiting.resumed is False
+    assert "stdin closed while waiting for human" in capsys.readouterr().err
+
+
+def test_task_with_configured_password_exits_2(monkeypatch, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setattr(planner, "plan", Mock(side_effect=AssertionError("planner must not run")))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    code = cli.main(["run", "--url", "https://x.test",
+                     "--task", "sign in with not-a-real-secret", "--plain"])
+    assert code == 2
+    assert "remove secrets from --task" in capsys.readouterr().err
+
+
+def test_prompt_resume_copy(monkeypatch, capsys):
+    prompts = []
+
+    def fake_input(prompt):
+        prompts.append(prompt)
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    cli._prompt_resume("Payment confirmation. Element: Go.")
+    err = capsys.readouterr().err
+    assert "Payment confirmation. Element: Go." in err
+    assert prompts == ["Complete this step in the browser, "
+                       "then press Enter to mark it done and continue... "]
 
 
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):

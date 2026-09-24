@@ -330,11 +330,11 @@ class JeviumApp(App):
                     markup=False,
                 )
                 yield Button(
-                    "Resume run",
+                    "Done — resume",
                     id="resume",
                     variant="primary",
                     compact=True,
-                    tooltip="Continue after completing the browser step",
+                    tooltip="Mark the browser step done, then let Jevium re-check and continue",
                 )
             yield Static(
                 "",
@@ -400,14 +400,17 @@ class JeviumApp(App):
         if state.get("status") == "waiting_human" and waiting:
             reason = waiting.get("reason", "human action required")
             self.query_one("#banner-message", Static).update(
-                f"{reason}\nComplete the step in the browser window, then resume Jevium."
+                f"{reason}\nComplete this exact step in the visible browser, then press "
+                "Done — resume. Jevium will re-check the page and continue."
             )
             banner.add_class("visible")
             resume.display = True
+            resume.disabled = False
             resume.focus()
         else:
             banner.remove_class("visible")
             resume.display = False
+            resume.disabled = False
 
     def handle_resume(self) -> None:
         """Thread-safe: only signals the worker; never touches Playwright here."""
@@ -417,8 +420,11 @@ class JeviumApp(App):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "resume":
             self.handle_resume()
-            self.query_one("#banner", Vertical).remove_class("visible")
-            event.button.display = False
+            acknowledgement = "Marked done — rechecking the page and continuing..."
+            self.query_one("#banner-message", Static).update(acknowledgement)
+            self.query_one("#active", Static).update(acknowledgement)
+            self.query_one("#log", RichLog).write(acknowledgement)
+            event.button.disabled = True
 
     def _fail(self, message: str) -> None:
         status = self.query_one("#status", Static)
