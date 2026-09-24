@@ -10,7 +10,8 @@ from .browser import BaseBrowser, StalePage  # noqa: F401  re-export for consume
 
 
 class Browser(BaseBrowser):
-    def __init__(self, url, *, headless=False, profile=None):
+    def __init__(self, url, *, headless=False, profile=None, wait_idle=False):
+        self.wait_idle = wait_idle
         self._pw = sync_playwright().start()
         self._browser = None
         self._context = None
@@ -23,12 +24,14 @@ class Browser(BaseBrowser):
                 user_data = Path.home() / ".jevium" / "profiles" / profile
                 user_data.mkdir(parents=True, exist_ok=True)
                 self._context = self._pw.chromium.launch_persistent_context(
-                    str(user_data), headless=headless, viewport=viewport
+                    str(user_data), headless=headless, viewport=viewport,
+                    reduced_motion="reduce",
                 )
                 self.page = self._context.pages[0] if self._context.pages else self._context.new_page()
             else:
                 self._browser = self._pw.chromium.launch(headless=headless)
-                self._context = self._browser.new_context(viewport=viewport)
+                self._context = self._browser.new_context(
+                    viewport=viewport, reduced_motion="reduce")
                 self.page = self._context.new_page()
             self._cdp = self._context.new_cdp_session(self.page)
             self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780,
@@ -44,6 +47,14 @@ class Browser(BaseBrowser):
             return self._cdp.send(method, params)
         except PlaywrightError as exc:
             raise StalePage(str(exc)) from None
+
+    def settle(self):
+        if not getattr(self, "wait_idle", False) or not getattr(self, "page", None):
+            return
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=1000)
+        except Exception:
+            pass
 
     def close(self):
         for closer in (

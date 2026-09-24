@@ -414,6 +414,15 @@ def test_replay_writes_report(monkeypatch, tmp_path):
     assert json.loads(target.read_text())["status"] == "done"
 
 
+def test_harness_rejects_wait_idle(monkeypatch, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--backend", "harness", "--wait-idle", "--plain"])
+    assert code == 2
+    assert "--wait-idle require --backend chromium" in capsys.readouterr().err
+
+
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):
     fresh_env(monkeypatch)
     monkeypatch.setenv("TYPESAFE_API_KEY", "k")

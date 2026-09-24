@@ -1540,7 +1540,7 @@ git push origin main
 **Interfaces:**
 - Produces: Playwright contexts created with `reduced_motion="reduce"`; `BaseBrowser.settle()` invoked at the top of every `observe()`; chromium `settle()` waits `networkidle` (1s cap, swallowed timeout) only when `wait_idle=True`; CLI `--wait-idle` is chromium-only (harness → exit2).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_cli.py`:
 
@@ -1578,7 +1578,7 @@ def test_reduced_motion_and_wait_idle():
 - `--wait-idle`: wait for network idle after each observation (chromium backend only; pairs with the default reduced-motion emulation)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1589,7 +1589,7 @@ uv run pytest -q tests/test_chromium_live.py::test_reduced_motion_and_wait_idle
 
 Expected: FAIL — CLI message assertion fails (argparse "unrecognized arguments" text, code2 for the wrong reason); live test raises `TypeError: Browser.__init__() got an unexpected keyword argument 'wait_idle'` (TypeError must propagate, not skip).
 
-- [ ] **Step 3: Implement determinism controls**
+- [x] **Step 3: Implement determinism controls**
 
 `jevium_core/chromium.py`:
 
@@ -1675,13 +1675,13 @@ Expected: FAIL — CLI message assertion fails (argparse "unrecognized arguments
                                 wait_idle=args.wait_idle)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run ruff check . && uv run pytest -q`
 
 Expected: full suite green (both new tests plus existing harness/profile restriction tests).
 
-- [ ] **Step 5: Tick Task5 checkboxes, commit, push**
+- [x] **Step 5: Tick Task5 checkboxes, commit, push**
 
 ```bash
 git add jevium_core/chromium.py jevium_core/browser.py jevium/cli.py tests/test_cli.py tests/test_chromium_live.py README.md

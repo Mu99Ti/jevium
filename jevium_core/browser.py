@@ -29,7 +29,11 @@ class BaseBrowser:
             raise StalePage("Document changed during evaluation")
         return response.get("result", {}).get("value")
 
+    def settle(self):
+        return None
+
     def observe(self, screenshot=True):
+        self.settle()
         if getattr(self, "after_input", None):
             action, self.after_input = self.after_input, None
             # This is read-only and happens after execution was logged, even if navigation interrupts it.

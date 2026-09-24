@@ -74,3 +74,18 @@ def test_actions_without_testid_omit_the_field():
         assert all("testid" not in a for a in state["actions"])
     finally:
         browser.close()
+
+
+def test_reduced_motion_and_wait_idle():
+    try:
+        b = chromium.Browser(RISK_PAGE, headless=True, wait_idle=True)
+    except TypeError:
+        raise  # our missing parameter is a bug, not an environment skip
+    except Exception as exc:
+        pytest.skip(f"chromium unavailable: {exc}")
+    try:
+        assert b.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches") is True
+        assert b.wait_idle is True
+        b.settle()  # loaded fixture page: networkidle resolves or is swallowed
+    finally:
+        b.close()

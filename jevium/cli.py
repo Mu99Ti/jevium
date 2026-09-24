@@ -52,6 +52,8 @@ def parse_args(argv=None):
                      help="Write a Playwright Test spec after a completed run.")
     run.add_argument("--report", metavar="PATH", default=None,
                      help="Write a JSON or JUnit XML run report (CI).")
+    run.add_argument("--wait-idle", action="store_true",
+                     help="Wait for network idle after each observation (chromium only).")
     return p.parse_args(argv)
 
 
@@ -139,7 +141,8 @@ def _start_browser(args, profile):
             from jevium_core import chromium
         except ImportError as exc:
             raise RuntimeError(f"playwright is not installed ({exc}); run: uv sync") from None
-        return chromium.Browser(args.url, headless=args.headless, profile=profile)
+        return chromium.Browser(args.url, headless=args.headless, profile=profile,
+                                wait_idle=args.wait_idle)
     from jevium_core.browser import Browser
     return Browser(args.url)
 
@@ -171,8 +174,8 @@ def main(argv=None) -> int:
     profile = _profile_path(args.profile)
     if profile is False:
         return 2
-    if args.backend == "harness" and (args.headless or args.profile):
-        print("jevium: --headless/--profile require --backend chromium.", file=sys.stderr)
+    if args.backend == "harness" and (args.headless or args.profile or args.wait_idle):
+        print("jevium: --headless/--profile/--wait-idle require --backend chromium.", file=sys.stderr)
         return 2
 
     browser_factory = None
@@ -182,7 +185,8 @@ def main(argv=None) -> int:
         except ImportError as exc:
             print(f"jevium: playwright is not installed ({exc}); run: uv sync", file=sys.stderr)
             return 2
-        browser_factory = partial(chromium.Browser, headless=args.headless, profile=profile)
+        browser_factory = partial(chromium.Browser, headless=args.headless,
+                                  profile=profile, wait_idle=args.wait_idle)
 
     record_dir = None
     if args.record:
