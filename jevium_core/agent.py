@@ -8,13 +8,16 @@ import time
 from pathlib import Path
 
 from .browser import Browser, StalePage
-from .model import action_space, choose, field_context, field_text
+from .model import REQUIRED_SECRETS, action_space, choose, configured_secret, field_context, field_text
 from .questions import MAX_STEPS
 
 GATE_REASONS = {
     "model": "The model asked for human intervention (NEEDS_HUMAN).",
     "page": "Page state suggests a human is required (CAPTCHA, payment, or verification).",
     "pay": "The selected target is a payment action. Confirm it, then resume.",
+    "otp": "The selected target needs a one-time code. Enter it, then resume.",
+    "secret": "The selected field needs a configured value or manual entry.",
+    "captcha": "A CAPTCHA is present. Complete it in the visible browser.",
 }
 
 
@@ -59,6 +62,7 @@ class Agent:
             record=bool(self.record_dir),
             waiting=None,
             last_pause=None,
+            login_submitted_fingerprint=None,
         )
         if self.record_dir:
             self.record_dir.mkdir(parents=True, exist_ok=True)
@@ -97,7 +101,13 @@ class Agent:
                 raise ValueError("This run has stopped. Start a fresh demo.")
             if len(state["decisions"]) >= self.max_steps * 2:
                 raise ValueError("Reached the demo's model-call budget")
-            state["decision"] = choose(state["page"], state["goal"], state["history"])
+            allow_login_submit = (
+                state.get("login_submitted_fingerprint") != state["page"]["fingerprint"]
+            )
+            state["decision"] = choose(
+                state["page"], state["goal"], state["history"],
+                allow_login_submit=allow_login_submit,
+            )
             state["decisions"].append(
                 {
                     **state["decision"],
@@ -107,10 +117,12 @@ class Agent:
             )
             gate = self._maybe_gate(state["decision"], state["page"])
             if gate:
+                element = self._waiting_element(state["decision"], state["page"], gate)
                 state["waiting"] = {
                     "trigger": gate,
-                    "reason": self._reason(state["decision"], gate),
+                    "reason": self._reason(state["decision"], gate, element),
                     "fingerprint": state["page"]["fingerprint"],
+                    "element": element,
                 }
                 state["decision"] = None
                 state["status"] = "waiting_human"
@@ -144,22 +156,55 @@ class Agent:
             if len(state["history"]) >= self.max_steps:
                 state["status"] = "blocked"
                 raise ValueError(f"Stopped at the {self.max_steps}-action demo budget")
-            text, helper = None, None
+            text, helper, used_env = None, None, False
             if action["kind"] == "fill":
-                if not state["browser"].fresh(page):
-                    raise StalePage("Page changed before text generation. Choose again.")
-                context = field_context(state["goal"], action, page, state["history"])
-                if self.pending_text and self.pending_text[0] == context:
-                    _, text, helper = self.pending_text
+                secret = action.get("secret")
+                configured = configured_secret(secret) if secret else ""
+                if secret in REQUIRED_SECRETS and not configured:
+                    element = {
+                        "label": action.get("label") or selected,
+                        "risk": action.get("risk"),
+                        "operation": decision.get("operation"),
+                        "target": decision.get("target"),
+                    }
+                    state["waiting"] = {
+                        "trigger": "secret",
+                        "reason": self._reason(decision, "secret", element),
+                        "fingerprint": page["fingerprint"],
+                        "element": element,
+                    }
+                    state["last_pause"] = {"trigger": "secret", "fingerprint": page["fingerprint"]}
+                    state["status"] = "waiting_human"
+                    state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+                    return self.snapshot()
+                if secret and configured:
+                    text, used_env = configured, True
                 else:
-                    text, helper = field_text(context)
-                    self.pending_text = (context, text, helper)
-                    state["text_calls"].append({**helper, "field": action["label"], "value": text})
+                    if not state["browser"].fresh(page):
+                        raise StalePage("Page changed before text generation. Choose again.")
+                    context = field_context(state["goal"], action, page, state["history"])
+                    if self.pending_text and self.pending_text[0] == context:
+                        _, text, helper = self.pending_text
+                    else:
+                        text, helper = field_text(context)
+                        self.pending_text = (context, text, helper)
+                        state["text_calls"].append({
+                            **helper,
+                            "field": action["label"],
+                            "value": "***" if secret else text,
+                        })
             # Browser.act checks freshness immediately before input, including after text generation.
             state["browser"].act(action, page, text=text)
             self.pending_text = None
+            if decision.get("model") == "login-fallback":
+                state["login_submitted_fingerprint"] = page["fingerprint"]
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
             # Record execution before observing. A stale post-action observation must not erase the action.
+            stored_text = "***" if action.get("secret") and text is not None else text
+            if used_env:
+                stored_helper = "environment"
+            else:
+                stored_helper = helper["model"] if helper else None
             state["history"].append(
                 {
                     "step": len(state["history"]) + 1,
@@ -169,8 +214,8 @@ class Agent:
                     "probability": decision["probabilities"][selected],
                     "confidence": decision["confidence"],
                     "latency_ms": decision["latency_ms"],
-                    "text": text,
-                    "text_helper": helper["model"] if helper else None,
+                    "text": stored_text,
+                    "text_helper": stored_helper,
                     "text_latency_ms": helper["latency_ms"] if helper else 0,
                     "operation": decision["operation"],
                     "target": decision["target"],
@@ -204,8 +249,21 @@ class Agent:
             raise ValueError("Unknown command")
         return self.snapshot()
 
-    def _gate(self, decision):
+    def _gate(self, decision, page):
         """Return the trigger id, or None to let the decision through."""
+        if "captcha" in (page.get("page_risks") or []):
+            return "captcha"
+        risk = decision.get("target_risk")
+        if risk == "pay":
+            return "pay"
+        if risk == "otp":
+            return "otp"
+        action = next((a for a in page.get("actions") or []
+                       if a.get("id") == decision.get("choice")), None)
+        secret = (action or {}).get("secret")
+        if (decision.get("operation") == "TYPE_TEXT" and secret in REQUIRED_SECRETS
+                and not configured_secret(secret)):
+            return "secret"
         if decision.get("operation") == "NEEDS_HUMAN":
             return "model"
         human = decision.get("human_intervention")
@@ -214,12 +272,10 @@ class Agent:
         floor = confidence_floor()
         if floor > 0 and decision.get("confidence", 1.0) < floor:
             return "confidence"
-        if decision.get("target_risk") == "pay":
-            return "pay"
         return None
 
     def _maybe_gate(self, decision, page):
-        trigger = self._gate(decision)
+        trigger = self._gate(decision, page)
         if trigger is None:
             return None
         last = self.state.get("last_pause")
@@ -231,12 +287,35 @@ class Agent:
         self.state["last_pause"] = {"trigger": trigger, "fingerprint": page["fingerprint"]}
         return trigger
 
-    def _reason(self, decision, trigger):
+    @staticmethod
+    def _waiting_element(decision, page, trigger):
+        if trigger == "captcha":
+            return {"label": "CAPTCHA challenge", "risk": "captcha",
+                    "operation": None, "target": None}
+        if not decision:
+            return None
+        action = next((a for a in page.get("actions") or []
+                       if a.get("id") == decision.get("choice")), None)
+        if not action:
+            return None
+        return {
+            "label": action.get("label") or decision.get("choice"),
+            "risk": action.get("risk") or decision.get("target_risk"),
+            "operation": decision.get("operation"),
+            "target": decision.get("target"),
+        }
+
+    def _reason(self, decision, trigger, element=None):
         if trigger == "confidence":
             floor = confidence_floor()
-            return (f"Decision confidence {decision.get('confidence', 0):.2f} "
+            base = (f"Decision confidence {decision.get('confidence', 0):.2f} "
                     f"is below JEVIUM_MIN_CONFIDENCE {floor:g}.")
-        return GATE_REASONS[trigger]
+        else:
+            base = GATE_REASONS[trigger]
+        label = (element or {}).get("label")
+        if label:
+            return f"{base} Element: {label}."
+        return base
 
     def resume(self):
         """Signal a waiting run to continue. Safe to call from any thread."""
@@ -252,7 +331,11 @@ class Agent:
                 return
             except StalePage:
                 time.sleep(0.1)
-        # Page never settled: stay waiting; the consumer may prompt again.
+        waiting = self.state.get("waiting") or {}
+        self.state["waiting"] = {
+            **waiting,
+            "reason": "Page did not settle after resume. Check the browser, then try again.",
+        }
 
     def run(self, on_waiting=None):
         while True:
@@ -266,6 +349,8 @@ class Agent:
                 else:
                     self._resume.wait()
                 self._after_resume()
+                if self.state["status"] == "waiting_human":
+                    yield self.snapshot()
                 continue
             yield self.command("tick")
 

@@ -230,6 +230,7 @@ def runner():
         "text_calls": [],
         "waiting": None,
         "last_pause": None,
+        "login_submitted_fingerprint": None,
         "elapsed_ms": 0,
         "plan": ["Find a book"],
         "plan_index": 0,
@@ -405,6 +406,62 @@ def risky_page():
     return p
 
 
+def login_page(*, username="", password="", submit=True, captcha=False):
+    actions = [
+        {"id": "u1", "kind": "fill", "label": "Username", "role": "textbox",
+         "value": username, "node": 10, "secret": "username", "risk": "username", "login_form": True},
+        {"id": "u1c", "kind": "click", "label": "Open Username", "role": "textbox",
+         "value": username, "node": 10, "secret": "username", "risk": "username", "login_form": True},
+        {"id": "p1", "kind": "fill", "label": "Password", "role": "textbox",
+         "value": password, "node": 11, "secret": "password", "risk": "credential", "login_form": True},
+        {"id": "p1c", "kind": "click", "label": "Open Password", "role": "textbox",
+         "value": password, "node": 11, "secret": "password", "risk": "credential", "login_form": True},
+    ]
+    if submit:
+        actions.append({"id": "s1", "kind": "click", "label": "Sign in", "role": "button",
+                        "value": "", "node": 20, "login_form": True})
+    state = {
+        "url": "https://example.test/login", "title": "Login", "text": "Sign in",
+        "scroll": {"y": 0}, "actions": actions,
+        "page_risks": ["captcha"] if captcha else [],
+    }
+    state["fingerprint"] = fingerprint(state)
+    return state
+
+
+def test_empty_configured_secret_maps_to_type_secret(monkeypatch):
+    monkeypatch.setenv("JEVIUM_USERNAME", "alice@example.test")
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    elements, targets, _controls = model.action_space(login_page()["actions"])
+    assert "TYPE_SECRET" in targets
+    assert set(targets["TYPE_SECRET"]) == {"1", "2"}
+    assert targets["TYPE_SECRET"]["1"]["id"] == "u1"
+    username = next(e for e in elements if e["label"] == "Username")
+    assert "TYPE_SECRET" in username["operations"]
+
+
+def test_filled_secret_offers_no_fill_operation(monkeypatch):
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    elements, targets, _controls = model.action_space(login_page(password="***")["actions"])
+    password = next(e for e in elements if e["label"] == "Password")
+    assert password["value"] == "***"
+    assert password["operations"] == ["CLICK"]
+    assert "TYPE_SECRET" not in targets
+    assert all(a["id"] != "p1" for group in targets.values() for a in group.values())
+
+
+def test_unconfigured_required_secret_stays_type_text(monkeypatch):
+    monkeypatch.delenv("JEVIUM_PASSWORD", raising=False)
+    monkeypatch.delenv("JEVIUM_USERNAME", raising=False)
+    _elements, targets, _controls = model.action_space(login_page()["actions"])
+    assert "TYPE_SECRET" not in targets
+    assert targets["TYPE_TEXT"]["1"]["id"] == "u1"          # optional username: LLM path
+    assert targets["TYPE_TEXT"]["2"]["id"] == "p1"          # required password: gated TYPE_TEXT
+    # A filled secret also offers no fill operation, even with nothing configured.
+    _elements2, targets2, _controls2 = model.action_space(login_page(password="***")["actions"])
+    assert all(a["id"] != "p1" for group in targets2.values() for a in group.values())
+
+
 def test_action_space_surfaces_human_risk():
     elements, _targets, _controls = model.action_space(risky_page()["actions"])
     assert elements[0]["human_risk"] == "otp"
@@ -516,7 +573,7 @@ def gated_decision(*, confidence=1.0, operation="CLICK", action="e3", human=None
 
 def test_confidence_gate_pauses_predict(runner, monkeypatch):
     monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0.3")
-    monkeypatch.setattr(loop, "choose", lambda *_a: gated_decision(confidence=0.1))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: gated_decision(confidence=0.1))
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     runner.command("predict", {})
@@ -527,7 +584,7 @@ def test_confidence_gate_pauses_predict(runner, monkeypatch):
 
 def test_noul_gate_pauses_predict(runner, monkeypatch):
     monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0")
-    monkeypatch.setattr(loop, "choose", lambda *_a: gated_decision(human=0.9))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: gated_decision(human=0.9))
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     runner.command("predict", {})
@@ -536,16 +593,100 @@ def test_noul_gate_pauses_predict(runner, monkeypatch):
 
 def test_pay_gate_pauses_predict(runner, monkeypatch):
     monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0")
-    monkeypatch.setattr(loop, "choose", lambda *_a: gated_decision(risk="pay"))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: gated_decision(risk="pay"))
+    runner.state["status"] = "ready"
+    runner.state["decision"] = None
+    runner.command("predict", {})
+    assert runner.state["waiting"]["trigger"] == "pay"
+    assert runner.state["waiting"]["element"]["label"] == "Go"
+    assert "Element: Go." in runner.state["waiting"]["reason"]
+
+
+def test_captcha_gate_pauses_before_configured_fill(runner, monkeypatch):
+    monkeypatch.setenv("JEVIUM_USERNAME", "alice@example.test")
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    monkeypatch.setattr(model, "post_json", Mock(side_effect=AssertionError("must not call model")))
+    runner.state["page"] = login_page(captcha=True)
+    runner.state["status"] = "ready"
+    runner.state["decision"] = None
+    runner.command("predict", {})
+    assert runner.state["status"] == "waiting_human"
+    assert runner.state["waiting"]["trigger"] == "captcha"
+    assert runner.state["waiting"]["element"]["label"] == "CAPTCHA challenge"
+    assert runner.state["decision"] is None
+    runner.state["browser"].act.assert_not_called()
+
+
+def test_missing_secret_gate_pauses_at_password(runner, monkeypatch):
+    monkeypatch.delenv("JEVIUM_PASSWORD", raising=False)
+    monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0")
+    monkeypatch.setattr(
+        loop, "choose",
+        lambda *_a, **_k: gated_decision(operation="TYPE_TEXT", action="p1", risk="credential"),
+    )
+    runner.state["page"] = login_page()
+    runner.state["status"] = "ready"
+    runner.state["decision"] = None
+    runner.command("predict", {})
+    assert runner.state["waiting"]["trigger"] == "secret"
+    assert runner.state["waiting"]["element"]["label"] == "Password"
+    assert "Element: Password." in runner.state["waiting"]["reason"]
+
+
+def test_otp_gate_carries_element_label(runner, monkeypatch):
+    monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0")
+    monkeypatch.setattr(
+        loop, "choose",
+        lambda *_a, **_k: gated_decision(operation="TYPE_TEXT", action="e1", risk="otp"),
+    )
+    runner.state["status"] = "ready"
+    runner.state["decision"] = None
+    runner.command("predict", {})
+    assert runner.state["waiting"]["trigger"] == "otp"
+    assert runner.state["waiting"]["element"]["label"] == "Search"
+    assert "Element: Search." in runner.state["waiting"]["reason"]
+
+
+def test_pay_gate_wins_over_low_confidence(runner, monkeypatch):
+    monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0.3")
+    monkeypatch.setattr(
+        loop, "choose",
+        lambda *_a, **_k: gated_decision(confidence=0.1, risk="pay"),
+    )
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     runner.command("predict", {})
     assert runner.state["waiting"]["trigger"] == "pay"
 
 
+def test_missing_card_configuration_pauses_at_card_field(runner, monkeypatch):
+    monkeypatch.delenv("JEVIUM_CARD_NUMBER", raising=False)
+    monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0")
+    card_page = {
+        "url": "https://example.test/pay", "title": "Pay", "text": "Card number",
+        "scroll": {"y": 0},
+        "actions": [
+            {"id": "c1", "kind": "fill", "label": "Card number", "role": "textbox",
+             "value": "", "node": 30, "secret": "card_number", "risk": "card_number"},
+        ],
+        "page_risks": [],
+    }
+    card_page["fingerprint"] = fingerprint(card_page)
+    monkeypatch.setattr(
+        loop, "choose",
+        lambda *_a, **_k: gated_decision(operation="TYPE_TEXT", action="c1", risk="card_number"),
+    )
+    runner.state["page"] = card_page
+    runner.state["status"] = "ready"
+    runner.state["decision"] = None
+    runner.command("predict", {})
+    assert runner.state["waiting"]["trigger"] == "secret"
+    assert runner.state["waiting"]["element"]["label"] == "Card number"
+
+
 def test_identical_gate_overrides_once_then_pauses_again(runner, monkeypatch):
     monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0.3")
-    monkeypatch.setattr(loop, "choose", lambda *_a: gated_decision(confidence=0.1))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: gated_decision(confidence=0.1))
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     runner.command("predict", {})
@@ -564,7 +705,7 @@ def test_identical_gate_overrides_once_then_pauses_again(runner, monkeypatch):
 def test_model_trigger_never_overrides(runner, monkeypatch):
     monkeypatch.setattr(
         loop, "choose",
-        lambda *_a: gated_decision(operation="NEEDS_HUMAN", action="NEEDS_HUMAN"),
+        lambda *_a, **_k: gated_decision(operation="NEEDS_HUMAN", action="NEEDS_HUMAN"),
     )
     runner.state["status"] = "ready"
     runner.state["decision"] = None
@@ -578,7 +719,7 @@ def test_model_trigger_never_overrides(runner, monkeypatch):
 
 def test_tick_skips_act_while_waiting(runner, monkeypatch):
     monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", "0.3")
-    monkeypatch.setattr(loop, "choose", lambda *_a: gated_decision(confidence=0.1))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: gated_decision(confidence=0.1))
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     runner.command("tick")
@@ -592,7 +733,7 @@ def test_run_pauses_with_callback_then_finishes(runner, monkeypatch):
     done = decision("DONE")
     done.update(operation="DONE", target=None, human_intervention=None, target_risk=None)
     answers = iter([low, done])
-    monkeypatch.setattr(loop, "choose", lambda *_a: next(answers))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: next(answers))
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     seen = []
@@ -638,7 +779,7 @@ def test_max_steps_attribute_bounds_history(runner):
 @pytest.mark.parametrize("floor_value", ["", "abc", "0.3", "0"])
 def test_confidence_floor_env_never_crashes(runner, monkeypatch, floor_value):
     monkeypatch.setenv("JEVIUM_MIN_CONFIDENCE", floor_value)
-    monkeypatch.setattr(loop, "choose", lambda *_a: gated_decision(confidence=0.1))
+    monkeypatch.setattr(loop, "choose", lambda *_a, **_k: gated_decision(confidence=0.1))
     runner.state["status"] = "ready"
     runner.state["decision"] = None
     runner.command("predict", {})
@@ -661,3 +802,199 @@ def test_record_writes_steps_jsonl(runner, tmp_path):
     assert len(lines) == 1
     entry = json.loads(lines[0])
     assert entry["kind"] == "wait" and entry["choice"] == "wait"
+
+
+def test_configured_secret_fill_skips_model(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEVIUM_USERNAME", "alice@example.test")
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    monkeypatch.setattr(model, "post_json", Mock(side_effect=AssertionError("must not call model")))
+    d = model.choose(login_page(), "Log in", [])
+    assert d["model"] == "configured-fallback"
+    assert d["operation"] == "TYPE_SECRET"
+    assert d["choice"] == "u1"
+    assert d["target"] == "1"
+    assert d["target_risk"] == "username"
+    assert d["request"] == {}
+
+
+def test_configured_fill_targets_next_empty_secret(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEVIUM_USERNAME", "alice@example.test")
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    monkeypatch.setattr(model, "post_json", Mock(side_effect=AssertionError("must not call model")))
+    d = model.choose(login_page(username="***"), "Log in", [])
+    assert d["choice"] == "p1"
+    assert d["target"] == "2"
+
+
+def test_configured_card_fill_skips_model(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEVIUM_CARD_NUMBER", "4111111111111111")
+    page_state = {
+        "url": "https://example.test/pay", "title": "Pay", "text": "Card number",
+        "scroll": {"y": 0},
+        "actions": [
+            {"id": "c1", "kind": "fill", "label": "Card number", "role": "textbox",
+             "value": "", "node": 30, "secret": "card_number", "risk": "card_number"},
+            {"id": "c1c", "kind": "click", "label": "Open Card number", "role": "textbox",
+             "value": "", "node": 30, "secret": "card_number", "risk": "card_number"},
+        ],
+        "page_risks": [],
+    }
+    page_state["fingerprint"] = fingerprint(page_state)
+    monkeypatch.setattr(model, "post_json", Mock(side_effect=AssertionError("must not call model")))
+    d = model.choose(page_state, "Pay with the configured card", [])
+    assert d["model"] == "configured-fallback"
+    assert d["operation"] == "TYPE_SECRET"
+    assert d["choice"] == "c1"
+    assert d["target_risk"] == "card_number"
+
+
+def test_login_submit_fallback_when_fields_filled(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setattr(model, "post_json", Mock(side_effect=AssertionError("must not call model")))
+    d = model.choose(login_page(username="***", password="***"), "Log in", [])
+    assert d["model"] == "login-fallback"
+    assert d["operation"] == "CLICK"
+    assert d["choice"] == "s1"
+    assert d["target"] == "3"
+    assert d["request"] == {}
+
+
+def test_login_submit_blocked_by_empty_login_input(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+
+    def post(_url, _key, body):
+        return {"model": "test", "answers": {
+            "operation": choice(body["questions"]["operation"]["criteria"], "DONE")}}
+
+    monkeypatch.setattr(model, "post_json", post)
+    d = model.choose(login_page(username="", password="***"), "Log in", [])
+    assert d["model"] == "test"
+
+
+def test_login_submit_disabled_for_same_fingerprint(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+
+    def post(_url, _key, body):
+        return {"model": "test", "answers": {
+            "operation": choice(body["questions"]["operation"]["criteria"], "DONE")}}
+
+    monkeypatch.setattr(model, "post_json", post)
+    d = model.choose(login_page(username="***", password="***"), "Log in", [],
+                     allow_login_submit=False)
+    assert d["model"] == "test"
+
+
+def test_model_payload_lists_configured_secrets_and_updated_prompts(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    captured = {}
+
+    def post(_url, _key, body):
+        captured.update(body)
+        return {"model": "test", "answers": {
+            "operation": choice(body["questions"]["operation"]["criteria"], "DONE")}}
+
+    monkeypatch.setattr(model, "post_json", post)
+    # Filled password + no submit button: no fallback fires, so the network is reached.
+    model.choose(login_page(username="***", password="***", submit=False), "Log in", [])
+    assert captured["state"]["page"]["configured_secrets"] == ["password"]
+    assert "not-a-real-secret" not in json.dumps(captured)
+    assert "configured_secrets" in captured["questions"]["operation"]["instructions"]["rules"]
+    assert "configured_secrets" in captured["questions"]["human_intervention"]["instructions"]
+    assert "empty login/payment-secret field" in captured["questions"]["operation"]["instructions"]["rules"]
+
+
+def test_configured_secret_act_types_environment_value(runner, monkeypatch):
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    helper = Mock(side_effect=AssertionError("TYPE_SECRET must not call the text helper"))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["page"] = login_page()
+    runner.state["decision"] = {
+        **decision("p1"),
+        "operation": "TYPE_SECRET",
+        "target": "2",
+        "target_risk": "credential",
+        "model": "configured-fallback",
+    }
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    helper.assert_not_called()
+    assert runner.state["browser"].act.call_count == 1
+    assert runner.state["browser"].act.call_args.kwargs["text"] == "not-a-real-secret"
+    assert runner.state["text_calls"] == []
+    entry = runner.state["history"][-1]
+    assert entry["text"] == "***"
+    assert entry["text_helper"] == "environment"
+    dumped = json.dumps(runner.state["history"]) + json.dumps(runner.state["text_calls"])
+    assert "not-a-real-secret" not in dumped
+
+
+def test_act_backstop_pauses_without_configured_secret(runner, monkeypatch):
+    monkeypatch.delenv("JEVIUM_PASSWORD", raising=False)
+    helper = Mock(side_effect=AssertionError("must not guess a required secret"))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["page"] = login_page()
+    runner.state["decision"] = decision("p1")
+    out = runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    helper.assert_not_called()
+    runner.state["browser"].act.assert_not_called()
+    assert out["status"] == "waiting_human"
+    assert out["waiting"]["trigger"] == "secret"
+    assert out["waiting"]["element"]["label"] == "Password"
+
+
+def test_login_fallback_click_records_fingerprint(runner):
+    runner.state["page"] = login_page(username="***", password="***")
+    before = runner.state["page"]["fingerprint"]
+    runner.state["decision"] = {
+        **decision("s1"),
+        "operation": "CLICK",
+        "target": "3",
+        "target_risk": None,
+        "model": "login-fallback",
+    }
+    runner.command("act", {"fingerprint": before})
+    assert runner.state["login_submitted_fingerprint"] == before
+    assert runner.state["history"][-1]["action"] == "Sign in"
+
+
+def test_predict_disables_login_submit_for_same_fingerprint(runner, monkeypatch):
+    runner.state["page"] = login_page(username="***", password="***")
+    runner.state["login_submitted_fingerprint"] = runner.state["page"]["fingerprint"]
+    seen = {}
+
+    def fake_choose(_page, _goal, _history, **kwargs):
+        seen.update(kwargs)
+        return gated_decision(confidence=1.0)
+
+    monkeypatch.setattr(loop, "choose", fake_choose)
+    runner.state["status"] = "ready"
+    runner.state["decision"] = None
+    runner.command("predict", {})
+    assert seen["allow_login_submit"] is False
+
+
+def test_resume_settle_failure_yields_waiting_state(runner, monkeypatch):
+    monkeypatch.setattr(loop.time, "sleep", lambda _s: None)
+    runner.state["status"] = "waiting_human"
+    runner.state["waiting"] = {"trigger": "pay", "reason": "r", "fingerprint": "f", "element": None}
+    runner.state["browser"].observe.side_effect = StalePage("never settles")
+    prompts = []
+
+    def on_waiting(_waiting):
+        prompts.append(1)
+        if len(prompts) == 1:
+            runner.resume()
+        else:
+            # Old run() loops back into on_waiting instead of yielding; fail fast, never hang.
+            raise RuntimeError("run() must yield the waiting snapshot after a failed re-observe")
+
+    gen = runner.run(on_waiting=on_waiting)
+    state = next(gen)
+    gen.close()
+    assert state["status"] == "waiting_human"
+    assert state["waiting"]["reason"] == (
+        "Page did not settle after resume. Check the browser, then try again."
+    )
