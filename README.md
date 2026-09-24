@@ -51,19 +51,23 @@ uv run jevium run --plain \
 
 ## Human-in-the-loop
 
-A run pauses in `waiting_human` for one of these reasons:
+A run pauses in `waiting_human` only when the next step needs a person:
 
-- **A:** Jev chose `NEEDS_HUMAN` — model-requested help (CAPTCHA, OTP, login)
-- **B:** speculative `human_intervention` says a person is required
-- **C:** confidence is below `JEVIUM_MIN_CONFIDENCE`
-- **D:** the selected target is a payment action
+- **A:** a CAPTCHA or human-verification challenge is present
+- **B:** the selected target is a one-time code (OTP/2FA) field
+- **C:** the selected target is a payment confirmation click
+- **D:** an empty login/payment field has no configured value
+- **E:** Jev chose `NEEDS_HUMAN` for a barrier outside those cases
+- **F:** speculative `human_intervention` or confidence below `JEVIUM_MIN_CONFIDENCE` (safety pauses)
 
-When the task reaches a login, Jevium pauses in `waiting_human` instead of guessing credentials. The visible Chromium window remains available for the person taking over.
+Each pause names the exact element when the barrier is an observed target.
 
-1. Jevium enters `waiting_human`.
-2. The person completes the step in the visible Chromium window.
-3. The TUI shows the reason and a **Resume** button; plain mode prompts on stdin and resumes on Enter.
-4. After resume, Jevium re-observes the page and continues the loop.
+Configure login and card values in git-ignored `.env` (`JEVIUM_USERNAME`, `JEVIUM_PASSWORD`, optional `JEVIUM_CARD_*`). Jevium fills those observed fields itself and never sends the values to a model. A login without a CAPTCHA proceeds automatically; the final payment click still pauses for a person.
+
+1. Jevium enters `waiting_human` and shows the exact element and reason.
+2. The person completes that step in the visible Chromium window.
+3. The TUI shows the reason and a **Done — resume** button; plain mode prompts on stdin and resumes on Enter.
+4. After marking the step done, Jevium re-checks the page and continues. If the page does not settle, it returns to `waiting_human` with a clear reason.
 
 ## CLI
 
@@ -103,7 +107,16 @@ Defaults and optional overrides:
 - `PLANNER_MODEL`
 - `JEVIUM_MIN_CONFIDENCE`
 
-Credentials stay in your local git-ignored `.env` and are not exposed to the browser.
+Optional login/payment secrets (server-side only; never put them in `--task`):
+
+- `JEVIUM_USERNAME`
+- `JEVIUM_PASSWORD`
+- `JEVIUM_CARD_NUMBER`
+- `JEVIUM_CARD_EXPIRY`
+- `JEVIUM_CARD_CVV`
+- `JEVIUM_CARD_NAME`
+
+Secret values stay in your local git-ignored `.env`. Jevium injects them only into observed secret fields and never sends them to models, history, or logs.
 
 ## Development
 
