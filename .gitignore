@@ -11,3 +11,4 @@ dist/
 runs/
 .jevium/
 .worktrees/
+.playwright-cli/
