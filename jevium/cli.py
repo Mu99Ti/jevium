@@ -13,6 +13,7 @@ from jevium_core.export_test import render_playwright_test
 from jevium_core.model import task_contains_configured_secret
 
 from . import planner, verifier
+from .report import render_report, report_format
 
 
 def load_env():
@@ -49,6 +50,8 @@ def parse_args(argv=None):
                      help="Replay a recorded steps.jsonl without model calls.")
     run.add_argument("--export-test", metavar="PATH", default=None,
                      help="Write a Playwright Test spec after a completed run.")
+    run.add_argument("--report", metavar="PATH", default=None,
+                     help="Write a JSON or JUnit XML run report (CI).")
     return p.parse_args(argv)
 
 
@@ -119,6 +122,14 @@ def run_plain(agent, goals, *, max_steps=None, export_path=None, report_path=Non
                 print(f"jevium: export failed: {exc}", file=sys.stderr)
         else:
             print("jevium: export skipped: run did not complete", file=sys.stderr)
+    if report_path:
+        fmt = report_format(report_path)
+        try:
+            path = Path(report_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(render_report(final, verdict, fmt))
+        except OSError as exc:
+            print(f"jevium: report failed: {exc}", file=sys.stderr)
     return 0 if final.get("status") == "done" else 1
 
 
@@ -149,6 +160,9 @@ def main(argv=None) -> int:
         return 2
     if task_contains_configured_secret(args.task):
         print("jevium: remove secrets from --task; put them in .env.", file=sys.stderr)
+        return 2
+    if args.report and report_format(args.report) is None:
+        print("jevium: --report must end in .json or .xml", file=sys.stderr)
         return 2
     if not args.replay and not os.environ.get("TEXT_MODEL_API_KEY"):
         print("jevium: warning: no TEXT_MODEL_API_KEY — TYPE_TEXT will abort at the first fill; "
@@ -202,6 +216,13 @@ def main(argv=None) -> int:
             [args.task], result["final_page"], result["history"],
             expected_url=steps[-1].get("url"),
         )
+        if args.report:
+            try:
+                path = Path(args.report)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(render_report(state, verdict, report_format(args.report)))
+            except OSError as exc:
+                print(f"jevium: report failed: {exc}", file=sys.stderr)
         if args.export_test:
             try:
                 path = Path(args.export_test)
@@ -236,7 +257,8 @@ def main(argv=None) -> int:
     if not args.plain and sys.stdin.isatty() and sys.stdout.isatty():
         from .tui import run_tui
         return run_tui(create_agent, goals=goals, max_steps=args.max_steps,
-                       export_path=args.export_test, start_url=args.url)
+                       export_path=args.export_test, report_path=args.report,
+                       start_url=args.url)
 
     try:
         agent = create_agent()
@@ -247,7 +269,8 @@ def main(argv=None) -> int:
     try:
         with agent:
             return run_plain(agent, goals, max_steps=args.max_steps,
-                             export_path=args.export_test, start_url=args.url)
+                             export_path=args.export_test, report_path=args.report,
+                             start_url=args.url)
     except KeyboardInterrupt:
         print("\njevium: interrupted.", file=sys.stderr)
         return 130

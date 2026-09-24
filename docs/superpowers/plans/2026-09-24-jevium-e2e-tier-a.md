@@ -1252,7 +1252,7 @@ git push origin main
 - Payload keys: `goals, status, success, reason, checks, actions, elapsed_ms, final_url, tokens:{input,output}, text_model_calls, model_ids`.
 - CLI flag `--report PATH`; an unknown suffix exits2 before any browser starts.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_report.py`:
 
@@ -1365,7 +1365,7 @@ In `tests/test_tui.py`, extend the Task3 test `test_finish_renders_export_when_d
 - `--report <path.json|path.xml>`: write a machine-readable run report (JSON or JUnit XML) for CI
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1377,7 +1377,7 @@ uv run pytest -q tests/test_tui.py::test_finish_renders_export_when_done
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'jevium.report'`; CLI missing `--report` handling (bad-suffix message assertion fails, report file not created); TUI `r.xml` missing.
 
-- [ ] **Step 3: Implement report module and wiring**
+- [x] **Step 3: Implement report module and wiring**
 
 Create `jevium/report.py`:
 
@@ -1512,13 +1512,13 @@ def render_report(state, verdict, fmt):
                 log.write(f"jevium: report failed: {exc}")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run ruff check . && uv run pytest -q`
 
 Expected: full suite green.
 
-- [ ] **Step 5: Tick Task4 checkboxes, commit, push**
+- [x] **Step 5: Tick Task4 checkboxes, commit, push**
 
 ```bash
 git add jevium/report.py tests/test_report.py jevium/cli.py jevium/tui.py tests/test_cli.py tests/test_tui.py README.md

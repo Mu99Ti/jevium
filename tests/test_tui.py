@@ -300,7 +300,8 @@ def test_finish_renders_export_when_done(tmp_path, monkeypatch):
                         lambda *a, **k: {"success": True, "reason": "ok", "checks": []})
     target = tmp_path / "out" / "flow.spec.ts"
     app = tui.JeviumApp(lambda: None, goals=["t"], max_steps=60,
-                        export_path=str(target), start_url="https://x.test/")
+                        export_path=str(target), start_url="https://x.test/",
+                        report_path=str(tmp_path / "r.xml"))
     app.run_worker = lambda *args, **kwargs: None
     app.exit = _Mock()
     state = {
@@ -319,3 +320,5 @@ def test_finish_renders_export_when_done(tmp_path, monkeypatch):
     asyncio.run(finish())
     assert target.exists()
     assert 'page.getByRole("button", { name: "Go" })' in target.read_text()
+    assert (tmp_path / "r.xml").exists()
+    assert (tmp_path / "r.xml").read_text().startswith("<testsuite")

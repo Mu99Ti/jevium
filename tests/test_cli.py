@@ -1,5 +1,6 @@
 """CLI contracts: startup validation, exit codes, summary. No browsers, no APIs."""
 
+import json
 import threading
 from unittest.mock import Mock
 
@@ -375,6 +376,42 @@ def test_export_skipped_when_not_done(monkeypatch, tmp_path, capsys):
     assert code == 1
     assert not out.exists()
     assert "export skipped" in capsys.readouterr().err
+
+
+def test_report_bad_suffix_exits_2(monkeypatch, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--plain", "--report", "out.txt"])
+    assert code == 2
+    assert "--report must end in .json or .xml" in capsys.readouterr().err
+
+
+def test_report_json_written_on_run(monkeypatch, tmp_path):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    monkeypatch.setattr(cli, "Agent", FakeAgent)
+    target = tmp_path / "ci" / "r.json"
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--plain", "--report", str(target)])
+    assert code == 0
+    payload = json.loads(target.read_text())
+    assert payload["status"] == "done"
+    assert "tokens" in payload and payload["checks"] == []
+
+
+def test_replay_writes_report(monkeypatch, tmp_path):
+    replay_mod, _factory, _browser, steps = _replay_cli_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(replay_mod, "replay", Mock(return_value={
+        "status": "done",
+        "history": [{"step": 1, "kind": "click", "action": "Go", "url": "https://x.test/done"}],
+        "final_page": {"url": "https://x.test/done", "title": "D", "text": ""},
+    }))
+    target = tmp_path / "replay.json"
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(steps), "--plain", "--report", str(target)])
+    assert code == 0
+    assert json.loads(target.read_text())["status"] == "done"
 
 
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):

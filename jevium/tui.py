@@ -10,6 +10,7 @@ from jevium_core.export_test import render_playwright_test
 
 from . import verifier
 from .cli import summary_lines
+from .report import render_report, report_format
 
 _STATUS_LABELS = {
     "ready": "READY",
@@ -475,6 +476,14 @@ class JeviumApp(App):
                     log.write(f"jevium: export failed: {exc}")
             else:
                 log.write("jevium: export skipped: run did not complete")
+        if self.report_path:
+            fmt = report_format(self.report_path)
+            try:
+                target = Path(self.report_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(render_report(final, verdict, fmt))
+            except OSError as exc:
+                log.write(f"jevium: report failed: {exc}")
         self.exit_code = 0 if final.get("status") == "done" else 1
         self.exit(self.exit_code)
 
