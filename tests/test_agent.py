@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from copy import deepcopy
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import httpx
 import pytest
@@ -83,6 +83,18 @@ def test_post_json_retries_network_errors(monkeypatch):
     monkeypatch.setattr(model.time, "sleep", lambda _seconds: None)
     assert model.post_json("https://model.test", "test", {}) == {"ok": True}
     assert post.call_count == 2
+
+
+def test_post_json_honors_retry_after_header(monkeypatch):
+    limited = httpx.Response(429, headers={"Retry-After": "4"})
+    success = httpx.Response(200, json={"ok": True})
+    post = Mock(side_effect=[limited, success])
+    sleep = Mock()
+    monkeypatch.setattr(model.CLIENT, "post", post)
+    monkeypatch.setattr(model.time, "sleep", sleep)
+    assert model.post_json("https://model.test", "test", {}) == {"ok": True}
+    assert post.call_count == 2
+    assert sleep.call_args_list == [call(4.0)]
 
 
 def test_loading_only_page_waits_without_model_call(monkeypatch):

@@ -22,7 +22,12 @@ def post_json(url, key, body):
             time.sleep(0.5 * 2**attempt)
             continue
         if response.status_code in {429, 529, 503} and attempt < 2:
-            time.sleep(0.5 * 2**attempt)
+            delay = 0.5 * 2**attempt
+            try:
+                delay = max(delay, float(response.headers.get("Retry-After", "0")))
+            except ValueError:
+                pass
+            time.sleep(delay)
             continue
         if response.is_error:
             raise RuntimeError(f"Model provider returned HTTP {response.status_code}; no action executed.")

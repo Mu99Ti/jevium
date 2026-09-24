@@ -84,7 +84,7 @@ def run_plain(agent, goals, *, max_steps=None):
             actions = len(state.get("history") or [])
             print(f"{state.get('elapsed_ms', 0):>5} ms  "
                   f"{_action_count_text(actions)}  {state.get('status')}")
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         print(f"jevium: {exc}", file=sys.stderr)
         return 1
     if final is None:

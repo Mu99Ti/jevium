@@ -178,3 +178,17 @@ def test_tui_defers_agent_creation_until_tui_worker(monkeypatch):
     monkeypatch.setattr(tui, "run_tui", fake_run_tui)
     assert cli.main(["run", "--url", "https://x.test", "--task", "t"]) == 0
     assert created == []
+
+
+def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    class RateLimited(FakeAgent):
+        def run(self, on_waiting=None):
+            raise RuntimeError("Model provider returned HTTP 429; no action executed.")
+            yield
+
+    monkeypatch.setattr(cli, "Agent", RateLimited)
+    assert cli.main(["run", "--url", "https://x.test", "--task", "t", "--plain"]) == 1
+    assert "Model provider returned HTTP 429" in capsys.readouterr().err
