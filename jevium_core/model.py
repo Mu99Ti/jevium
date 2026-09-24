@@ -37,6 +37,47 @@ def task_contains_configured_secret(task):
     )
 
 
+_CREDENTIAL_PAIR_PATTERNS = (
+    # username password <user> <pass>
+    re.compile(r"\busername\s+password\s+(\S+)\s+(\S+)", re.I),
+    # username[:=] <user> password[:=] <pass>
+    re.compile(r"\busername\s*[:=]?\s*(\S+)\s+password\s*[:=]?\s*(\S+)", re.I),
+    # password[:=] <pass> username[:=] <user>
+    re.compile(r"\bpassword\s*[:=]?\s*(\S+)\s+username\s*[:=]?\s*(\S+)", re.I),
+)
+_TASK_CREDENTIAL_HINT = re.compile(
+    r"\busername\b.*\bpassword\b|\bpassword\b.*\busername\b", re.I | re.S)
+_TASK_LOGIN_HINT = re.compile(
+    r"\b(login|sign\s?in|signin|log\s?on|logon|authenticate|authentication)\b", re.I)
+
+
+def extract_task_credentials(task):
+    """Split a structured username/password pair out of a task.
+
+    Returns (clean_task, username, password). Extraction requires both field
+    names, a login intent, and a password-shaped value (>=6 chars with a digit
+    and a symbol); otherwise the task is returned untouched so the existing
+    reject/pause paths still apply. The password never remains in clean_task;
+    the username is kept there as harmless context for fallback typing.
+    """
+    if not (_TASK_CREDENTIAL_HINT.search(task) and _TASK_LOGIN_HINT.search(task)):
+        return task, None, None
+    for index, pattern in enumerate(_CREDENTIAL_PAIR_PATTERNS):
+        match = pattern.search(task)
+        if not match:
+            continue
+        if index == 2:
+            password, username = match.group(1), match.group(2)
+        else:
+            username, password = match.group(1), match.group(2)
+        if not (len(username) >= 2 and len(password) >= 6
+                and re.search(r"\d", password) and re.search(r"[^A-Za-z0-9]", password)):
+            return task, None, None
+        clean = pattern.sub(f"username password {username}", task, count=1)
+        return clean, username, password
+    return task, None, None
+
+
 def post_json(url, key, body):
     for attempt in range(3):
         try:

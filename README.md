@@ -62,7 +62,7 @@ A run pauses in `waiting_human` only when the next step needs a person:
 
 Each pause names the exact element when the barrier is an observed target.
 
-Configure login and card values in git-ignored `.env` (`JEVIUM_USERNAME`, `JEVIUM_PASSWORD`, optional `JEVIUM_CARD_*`). Jevium fills those observed fields itself and never sends the values to a model. A login without a CAPTCHA proceeds automatically; the final payment click still pauses for a person.
+Configure login and card values in git-ignored `.env` (`JEVIUM_USERNAME`, `JEVIUM_PASSWORD`, optional `JEVIUM_CARD_*`), or pass the structured `username <user> password <pass>` pair in `--task` — Jevium strips it from the goal before planning. Jevium fills those observed fields itself and never sends the values to a model. A login without a CAPTCHA proceeds automatically; the final payment click still pauses for a person.
 
 1. Jevium enters `waiting_human` and shows the exact element and reason.
 2. The person completes that step in the visible Chromium window.
@@ -139,7 +139,7 @@ Defaults and optional overrides:
 - `PLANNER_MODEL`
 - `JEVIUM_MIN_CONFIDENCE`
 
-Optional login/payment secrets (server-side only; never put them in `--task`):
+Optional login/payment secrets (server-side only; prefer `.env` over `--task`):
 
 - `JEVIUM_USERNAME`
 - `JEVIUM_PASSWORD`
@@ -149,6 +149,8 @@ Optional login/payment secrets (server-side only; never put them in `--task`):
 - `JEVIUM_CARD_NAME`
 
 Secret values stay in your local git-ignored `.env`. Jevium injects them only into observed secret fields and never sends them to models, history, or logs.
+
+Credentials may also be passed in `--task` using the structured form `username <user> password <pass>` (also accepted: the compact `username password <user> <pass>` and labelled `username: <user> password: <pass>` variants). Jevium requires a login intent and a password-shaped value, strips the password from the goal **before any model call**, and injects both values for the run only. Any other task-embedded secret is rejected with exit `2` before planning.
 
 ## Development
 

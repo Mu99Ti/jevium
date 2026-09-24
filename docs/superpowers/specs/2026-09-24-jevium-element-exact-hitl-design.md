@@ -27,7 +27,7 @@ Keep Jev choosing ordinary operations and observed targets. Add an executor-owne
 
 Rejected alternatives:
 
-- Parse credentials from `--task`: task text leaves the process through planner/model calls and is logged.
+- Unstructured credentials in `--task`: task text would leave the process through planner/model calls and be logged. Only the structured pair form is accepted, and it is stripped from the goal before any model call.
 - Prompt-only auto-login: relies on the model choosing correctly every time.
 - Code-owned selectors or site-specific login plans: forbidden by the repository contract.
 
@@ -44,7 +44,7 @@ Credentials are read from the process environment, normally supplied through git
 | `JEVIUM_CARD_CVV` | `card_cvv` | Fills an empty observed security-code field. |
 | `JEVIUM_CARD_NAME` | `card_name` | Fills an empty observed cardholder-name field. |
 
-No CLI credential flags. No parsing secrets from the task. Tests never use real credentials.
+No CLI credential flags. Secrets normally come from the environment; the only task-text form accepted is the structured `username <user> password <pass>` pair (plus labelled/password-first variants), extracted before planning, with the password removed from the goal and both values injected into the process environment for the run. Extraction requires a login intent and a password-shaped value (at least6 characters containing a digit and a symbol); anything else embedded in the task is still rejected before any model call. Tests never use real credentials.
 
 ## Snapshot contract
 
@@ -115,7 +115,7 @@ Every `waiting_human` state carries `element: {label, risk, operation, target}` 
 ## Security constraints
 
 - Secret values exist only in process environment memory and the live browser fill.
-- The CLI rejects `--task` before planning when it contains a configured password or card value; users put secrets in `.env`, not in the task string.
+- The CLI strips a structured credential pair from `--task` before planning and rejects any remaining configured password/card value with exit2; users should prefer `.env`, not the task string.
 - No configured secret values in model request bodies, planner/verifier prompts, history, logs, recordings metadata, or error strings.
 - No model-generated selectors or JavaScript.
 - Payment clicks are never executed without a `waiting_human` pause and an explicit Done — resume on that page.

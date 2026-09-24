@@ -5,6 +5,7 @@ import threading
 from unittest.mock import Mock
 
 from jevium import cli, planner, verifier
+from jevium_core.model import extract_task_credentials
 
 
 def fresh_env(monkeypatch):
@@ -222,6 +223,59 @@ def test_task_with_configured_password_exits_2(monkeypatch, capsys):
                      "--task", "sign in with not-a-real-secret", "--plain"])
     assert code == 2
     assert "remove secrets from --task" in capsys.readouterr().err
+
+
+def test_extract_structured_credential_pair():
+    clean, user, password = extract_task_credentials(
+        "login with username password 09123456789 Sup3r-Pass!")
+    assert (user, password) == ("09123456789", "Sup3r-Pass!")
+    assert "Sup3r-Pass!" not in clean
+    assert clean == "login with username password 09123456789"
+
+
+def test_extract_labelled_credential_pair():
+    clean, user, password = extract_task_credentials(
+        "signin login username: bob password: Sup3r-Pass!")
+    assert (user, password) == ("bob", "Sup3r-Pass!")
+    assert "Sup3r-Pass!" not in clean and "bob" in clean
+
+
+def test_extract_skips_unstructured_or_weak_values():
+    # no username keyword
+    assert extract_task_credentials("help me with password reset") == (
+        "help me with password reset", None, None)
+    # password value does not look like a credential (no digit/symbol)
+    assert extract_task_credentials("login with username password reset steps") == (
+        "login with username password reset steps", None, None)
+    # keywords without a parseable pair
+    assert extract_task_credentials("login with username and password") == (
+        "login with username and password", None, None)
+
+
+def test_task_credentials_stripped_and_injected_before_planning(monkeypatch, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    monkeypatch.delenv("JEVIUM_USERNAME", raising=False)
+    monkeypatch.delenv("JEVIUM_PASSWORD", raising=False)
+    seen = {}
+
+    def spy_plan(task=None, **kwargs):
+        seen["plan_task"] = task
+        seen["password_in_env"] = (
+            __import__("os").environ.get("JEVIUM_PASSWORD") == "Sup3r-Pass!")
+        return [task]
+
+    monkeypatch.setattr(planner, "plan", spy_plan)
+    monkeypatch.setattr(cli, "Agent", FakeAgent)
+    code = cli.main(["run", "--url", "https://x.test", "--plain", "--task",
+                     "login with username password 09123456789 Sup3r-Pass!"])
+    assert code == 0
+    assert seen["plan_task"] == "login with username password 09123456789"
+    assert "Sup3r-Pass!" not in seen["plan_task"]
+    assert seen["password_in_env"] is True
+    captured = capsys.readouterr()
+    assert "using credentials from --task" in captured.err
+    assert "Sup3r-Pass!" not in captured.out and "Sup3r-Pass!" not in captured.err
 
 
 def test_prompt_resume_copy(monkeypatch, capsys):

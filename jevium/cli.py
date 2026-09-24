@@ -11,7 +11,7 @@ from pathlib import Path
 
 from jevium_core import Agent, replay
 from jevium_core.export_test import render_playwright_test
-from jevium_core.model import task_contains_configured_secret
+from jevium_core.model import extract_task_credentials, task_contains_configured_secret
 
 from . import planner, verifier
 from .report import render_report, report_format
@@ -185,6 +185,14 @@ def main(argv=None) -> int:
     if not args.task.strip():
         print("jevium: --task must not be empty.", file=sys.stderr)
         return 2
+    args.task, cred_username, cred_password = extract_task_credentials(args.task)
+    if cred_username or cred_password:
+        if cred_username:
+            os.environ["JEVIUM_USERNAME"] = cred_username
+        if cred_password:
+            os.environ["JEVIUM_PASSWORD"] = cred_password
+        print("jevium: using credentials from --task for this run (stripped before planning); "
+              "prefer JEVIUM_* in .env for reuse.", file=sys.stderr)
     if task_contains_configured_secret(args.task):
         print("jevium: remove secrets from --task; put them in .env.", file=sys.stderr)
         return 2
