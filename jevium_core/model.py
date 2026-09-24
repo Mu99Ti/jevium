@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 import time
 
 import httpx
@@ -10,6 +11,30 @@ import httpx
 from .questions import HUMAN_INTERVENTION, NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.Client(http2=True, timeout=25)
+
+SENSITIVE_ENV = {
+    "username": "JEVIUM_USERNAME",
+    "password": "JEVIUM_PASSWORD",
+    "card_number": "JEVIUM_CARD_NUMBER",
+    "card_expiry": "JEVIUM_CARD_EXPIRY",
+    "card_cvv": "JEVIUM_CARD_CVV",
+    "card_name": "JEVIUM_CARD_NAME",
+}
+REQUIRED_SECRETS = frozenset({"password", "card_number", "card_expiry", "card_cvv", "card_name"})
+SECRET_ORDER = {kind: i for i, kind in enumerate(
+    ("username", "password", "card_name", "card_number", "card_expiry", "card_cvv")
+)}
+
+
+def configured_secret(kind):
+    return os.environ.get(SENSITIVE_ENV.get(kind, ""), "")
+
+
+def task_contains_configured_secret(task):
+    return any(
+        value and value in task
+        for value in (configured_secret(kind) for kind in REQUIRED_SECRETS)
+    )
 
 
 def post_json(url, key, body):
@@ -73,11 +98,17 @@ def action_space(actions):
                 element["options"] = []
             elements.append(element)
         index = indices[node]
-        operation = operations[kind]
-        group = targets.setdefault(operation, {})
         element = elements[int(index) - 1]
         if "risk" in action:
             element["human_risk"] = action["risk"]
+        secret = action.get("secret")
+        if kind == "fill" and secret and action.get("value"):
+            continue  # filled secret: keep the element, offer no fill operation
+        if kind == "fill" and secret:
+            operation = "TYPE_SECRET" if configured_secret(secret) else "TYPE_TEXT"
+        else:
+            operation = operations[kind]
+        group = targets.setdefault(operation, {})
         if operation not in element["operations"]:
             element["operations"].append(operation)
         target = index
@@ -114,11 +145,73 @@ def _loading_decision(operations, choice):
     }
 
 
-def choose(state, goal, history):
+def _fallback_decision(*, choice_id, operation, target, risk, model_name):
+    return {
+        "choice": choice_id,
+        "operation": operation,
+        "target": target,
+        "target_risk": risk,
+        "human_intervention": 0.0,
+        "confidence": 1.0,
+        "probabilities": {choice_id: 1.0},
+        "operation_probabilities": {operation: 1.0},
+        "target_probabilities": {target: 1.0},
+        "target_confidence": 1.0,
+        "raw_answers": {},
+        "model": model_name,
+        "usage": {},
+        "latency_ms": 0.0,
+        "request": {},
+    }
+
+
+def _configured_secret_decision(state, targets):
+    best = None
+    for index, action in targets.get("TYPE_SECRET", {}).items():
+        kind = action.get("secret")
+        if not kind or not configured_secret(kind) or action.get("value"):
+            continue
+        rank = SECRET_ORDER.get(kind, 99)
+        if best is None or rank < best[0]:
+            best = (rank, index, action)
+    if best is None:
+        return None
+    _, index, action = best
+    return _fallback_decision(
+        choice_id=action["id"], operation="TYPE_SECRET", target=index,
+        risk=action.get("risk"), model_name="configured-fallback",
+    )
+
+
+def _login_submit_decision(state, targets):
+    passwords = [a for a in state["actions"]
+                 if a.get("secret") == "password" and a.get("kind") == "fill"]
+    if not passwords or not any(p.get("value") for p in passwords):
+        return None
+    for action in state["actions"]:
+        if action.get("login_form") and action.get("kind") == "fill" and not action.get("value"):
+            return None
+    pattern = re.compile(r"\b(sign\s*in|log\s*in|login|continue|next|submit)\b", re.I)
+    for index, action in targets.get("CLICK", {}).items():
+        if not action.get("login_form") or action.get("risk") in {"pay", "otp"}:
+            continue
+        if pattern.search(action.get("label") or ""):
+            return _fallback_decision(
+                choice_id=action["id"], operation="CLICK", target=index,
+                risk=action.get("risk"), model_name="login-fallback",
+            )
+    return None
+
+
+def choose(state, goal, history, *, allow_login_submit=True):
     elements, targets, controls = action_space(state["actions"])
+    present = {a.get("secret") for a in state["actions"] if a.get("secret")}
+    configured = [kind for kind in SENSITIVE_ENV if kind in present and configured_secret(kind)]
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
+        "TYPE_SECRET": "Fill this field with its configured environment secret. "
+                       "The value is never shown or sent to a model.",
         "SELECT": "Select an observed dropdown value.",
     }
     operations = {key: labels[key] for key in targets}
@@ -126,7 +219,8 @@ def choose(state, goal, history):
     operations.update(
         NEEDS_HUMAN={
             "what": "A human must complete or authorize this step in the visible browser now.",
-            "not_for": "Ordinary clicks/typing the agent can perform, or true dead ends (that is BLOCKED).",
+            "not_for": "Ordinary clicks/typing the agent can perform, fills backed by "
+                       "configured_secrets, or true dead ends (that is BLOCKED).",
             "examples": [
                 "CAPTCHA or 'verify you are human' widget is showing",
                 "Checkout payment confirmation is waiting",
@@ -138,6 +232,13 @@ def choose(state, goal, history):
     )
     if _loading_only(state["actions"]):
         return _loading_decision(operations, controls["WAIT"]["id"])
+    secret_decision = _configured_secret_decision(state, targets)
+    if secret_decision is not None:
+        return secret_decision
+    if allow_login_submit:
+        login_decision = _login_submit_decision(state, targets)
+        if login_decision is not None:
+            return login_decision
     questions = {
         "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
     }
@@ -159,6 +260,8 @@ def choose(state, goal, history):
     page_state = {k: state[k] for k in ("url", "title", "text")}
     if "page_risks" in state:
         page_state["page_risks"] = state["page_risks"]
+    if configured:
+        page_state["configured_secrets"] = configured
     body = {
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
         "state": {
