@@ -32,6 +32,10 @@ class BaseBrowser:
     def settle(self):
         return None
 
+    def save_failure_artifacts(self, directory):
+        """Best-effort failure artifacts; backends without tracing return []."""
+        return []
+
     def observe(self, screenshot=True):
         self.settle()
         if getattr(self, "after_input", None):

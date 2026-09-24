@@ -30,13 +30,13 @@
 **Interfaces:**
 - Produces: nothing executable; establishes the doc baseline for later tasks.
 
-- [ ] **Step 1: Verify the working tree holds only the two doc files**
+- [x] **Step 1: Verify the working tree holds only the two doc files**
 
 Run: `git status --porcelain=v1`
 
 Expected: exactly two untracked lines — the spec and this plan file.
 
-- [ ] **Step 2: Commit and push the docs**
+- [x] **Step 2: Commit and push the docs**
 
 ```bash
 git add docs/superpowers/specs/2026-09-24-jevium-e2e-tier-a-design.md docs/superpowers/plans/2026-09-24-jevium-e2e-tier-a.md
@@ -1706,7 +1706,7 @@ git push origin main
 **Interfaces:**
 - Produces: `BaseBrowser.save_failure_artifacts(directory) -> list[Path]` (default `[]`); chromium override writes `trace.zip` + `network.json`; `Agent.save_failure_artifacts(directory, results_json=None) -> list[Path]` always writes `steps.jsonl` + `results.json`; CLI helper `_save_failure_artifacts(agent) -> Path | None` used on every non-zero plain-mode exit and in the outer error/interrupt handlers; TUI uses it in `_fail` and `_finish` when `exit_code != 0`; replay drift writes `drift.json` alongside browser artifacts.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_agent.py`:
 
@@ -1851,7 +1851,7 @@ def test_base_browser_artifacts_default_empty():
 - Failure runs save `steps.jsonl`, `results.json`, and — with `--backend chromium` — `trace.zip` plus `network.json` under `runs/failure-<timestamp>/` (or the `--record` directory)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1864,7 +1864,7 @@ uv run pytest -q tests/test_chromium_live.py::test_failure_artifacts_include_tra
 
 Expected: FAIL — `AttributeError: 'Agent' object has no attribute 'save_failure_artifacts'`; CLI `AttributeError`/saved-not-called; TUI no save; live `AttributeError` on chromium save; base default missing method.
 
-- [ ] **Step 3: Implement artifacts**
+- [x] **Step 3: Implement artifacts**
 
 `jevium_core/browser.py` — add the default method to `BaseBrowser` (next to `settle`):
 
@@ -2068,13 +2068,13 @@ def _save_failure_artifacts(agent):
             self._save_artifacts()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run ruff check . && uv run pytest -q`
 
 Expected: full suite green.
 
-- [ ] **Step 5: Tick every checkbox in this plan, commit, push**
+- [x] **Step 5: Tick every checkbox in this plan, commit, push**
 
 Tick all remaining `- [ ]` boxes in this file to `- [x]`, then:
 
@@ -2097,7 +2097,7 @@ Expected: push succeeds; `git status --porcelain=v1` is empty (plan file now com
 - Consumes: the pushed tree at Task 6's commit.
 - Produces: fresh proof that the branch is green and in sync with the remote.
 
-- [ ] **Step 1: Run every repository check**
+- [x] **Step 1: Run every repository check**
 
 Run:
 
@@ -2114,7 +2114,7 @@ echo "ALL CHECKS PASSED"
 
 Expected: Ruff clean, all pytest tests green (previous122 + every new test from Tasks1–6), both `node --check` silent, build succeeds, no whitespace errors across the seven commits, final marker printed.
 
-- [ ] **Step 2: Confirm secrets, cleanliness, and remote sync**
+- [x] **Step 2: Confirm secrets, cleanliness, and remote sync**
 
 Run:
 
@@ -2142,6 +2142,6 @@ git log --oneline 688c3cb..HEAD
 
 Expected: `secret scan: PASS`; `0` dirty files; `0` staged lines; local HEAD SHA equals the `ls-remote` SHA; exactly seven commits listed (docs + six features).
 
-- [ ] **Step 3: Stop — nothing to commit or push**
+- [x] **Step 3: Stop — nothing to commit or push**
 
 This task produces evidence only. The work is complete when Step1 and Step2 both match their expected outputs; report the results with the seven commit subjects and the final SHA.

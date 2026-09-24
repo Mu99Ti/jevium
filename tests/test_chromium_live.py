@@ -1,5 +1,6 @@
 """Live smoke: real Chromium, no model calls. Skips when the browser is unavailable."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -89,3 +90,27 @@ def test_reduced_motion_and_wait_idle():
         b.settle()  # loaded fixture page: networkidle resolves or is swallowed
     finally:
         b.close()
+
+
+def test_failure_artifacts_include_trace(tmp_path):
+    try:
+        b = chromium.Browser(LOGIN_PAGE, headless=True)
+    except Exception as exc:
+        pytest.skip(f"chromium unavailable: {exc}")
+    try:
+        directory = tmp_path / "fail"
+        directory.mkdir()
+        b.evaluate("document.title")
+        b.save_failure_artifacts(directory)
+        trace = directory / "trace.zip"
+        assert trace.is_file() and trace.stat().st_size > 0
+        entries = json.loads((directory / "network.json").read_text())["entries"]
+        assert isinstance(entries, list)
+    finally:
+        b.close()
+
+
+def test_base_browser_artifacts_default_empty():
+    from jevium_core.browser import Browser
+    b = Browser.__new__(Browser)
+    assert b.save_failure_artifacts(Path("/tmp/jevium-artifact-probe")) == []

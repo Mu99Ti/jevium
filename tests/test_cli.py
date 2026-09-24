@@ -423,6 +423,38 @@ def test_harness_rejects_wait_idle(monkeypatch, capsys):
     assert "--wait-idle require --backend chromium" in capsys.readouterr().err
 
 
+def test_plain_failure_saves_artifacts(monkeypatch, tmp_path, capsys):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    artifact_dir = tmp_path / "art"
+    instances = []
+
+    class BlockedWithArtifacts(FakeAgent):
+        def __init__(self, *args, **kwargs):
+            self.record_dir = artifact_dir
+            self.saved = None
+            instances.append(self)
+
+        def save_failure_artifacts(self, directory, results_json=None):
+            self.saved = (directory, results_json)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "results.json").write_text(results_json or "{}")
+            return [directory / "results.json"]
+
+        def run(self, on_waiting=None):
+            yield {"status": "blocked", "elapsed_ms": 5, "history": [],
+                   "page": {"url": "https://x.test/", "title": "t", "text": ""},
+                   "waiting": None, "plan": ["t"]}
+
+    monkeypatch.setattr(cli, "Agent", BlockedWithArtifacts)
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t", "--plain"])
+    assert code == 1
+    directory, results_json = instances[0].saved
+    assert directory == artifact_dir
+    assert json.loads(results_json)["tokens"] == {"input": 0, "output": 0}
+    assert str(artifact_dir) in capsys.readouterr().err
+
+
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):
     fresh_env(monkeypatch)
     monkeypatch.setenv("TYPESAFE_API_KEY", "k")

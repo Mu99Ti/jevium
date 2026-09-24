@@ -322,3 +322,40 @@ def test_finish_renders_export_when_done(tmp_path, monkeypatch):
     assert 'page.getByRole("button", { name: "Go" })' in target.read_text()
     assert (tmp_path / "r.xml").exists()
     assert (tmp_path / "r.xml").read_text().startswith("<testsuite")
+
+
+def test_fail_and_finish_save_artifacts(tmp_path, monkeypatch):
+    from unittest.mock import Mock as _Mock
+    monkeypatch.setattr(tui.verifier, "verify",
+                        lambda *a, **k: {"success": None, "reason": "blocked", "checks": []})
+    saved = []
+
+    class Agent:
+        record_dir = None
+
+        def resume(self):
+            pass
+
+        def save_failure_artifacts(self, directory, results_json=None):
+            saved.append(directory)
+            return []
+
+    app = tui.JeviumApp(lambda: Agent(), goals=["g"], max_steps=60)
+    app.agent = Agent()
+    app.run_worker = lambda *args, **kwargs: None
+    app.exit = _Mock()
+    blocked = {"status": "blocked", "elapsed_ms": 5, "history": [],
+               "page": {"url": "https://x.test/", "title": "t", "text": ""},
+               "waiting": None, "plan": ["g"]}
+
+    async def flow():
+        async with app.run_test(size=(80, 24)):
+            app._finish(blocked)
+            assert app.exit_code == 1
+            assert saved, "_finish should save artifacts on failure"
+            app._fail("boom")
+            assert len(saved) == 2
+            log_lines = [str(line) for line in app.query_one("#log").lines]
+            assert any("failure artifacts saved to" in line for line in log_lines)
+
+    asyncio.run(flow())

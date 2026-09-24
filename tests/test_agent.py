@@ -1019,3 +1019,38 @@ def test_secret_fill_records_secret_kind(runner, monkeypatch):
     loc = runner.state["history"][-1]["locator"]
     assert loc == {"kind": "fill", "role": "textbox", "name": "Password",
                    "nth": 0, "secret": "password"}
+
+
+def test_save_failure_artifacts_writes_steps_and_results(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv("JEVIUM_PASSWORD", "not-a-real-secret")
+    browser = runner.state["browser"]
+    browser.save_failure_artifacts = Mock(return_value=[])
+    runner.final_verdict = {"success": False, "reason": "url mismatch",
+                            "checks": [{"type": "expected_url", "ok": False}]}
+    runner.state["history"] = [{
+        "step": 1, "action": "Fill Password", "kind": "fill", "text": "***",
+        "url": "https://x.test/login",
+        "locator": {"kind": "fill", "role": "textbox", "name": "Password",
+                    "nth": 0, "secret": "password"},
+    }]
+    directory = tmp_path / "fail"
+    saved = runner.save_failure_artifacts(directory)
+    browser.save_failure_artifacts.assert_called_once_with(directory)
+    steps_text = (directory / "steps.jsonl").read_text()
+    assert "Fill Password" in steps_text
+    assert "not-a-real-secret" not in steps_text
+    results = json.loads((directory / "results.json").read_text())
+    assert results["success"] is False
+    assert results["reason"] == "url mismatch"
+    assert {directory / "steps.jsonl", directory / "results.json"} <= set(saved)
+
+
+def test_save_failure_artifacts_default_verdict(runner, tmp_path):
+    runner.state["browser"].save_failure_artifacts = Mock(return_value=[])
+    if hasattr(runner, "final_verdict"):
+        del runner.final_verdict
+    directory = tmp_path / "fail2"
+    runner.save_failure_artifacts(directory)
+    results = json.loads((directory / "results.json").read_text())
+    assert results["success"] is None
+    assert results["reason"] == "run failed before verification"

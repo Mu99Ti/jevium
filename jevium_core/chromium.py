@@ -1,5 +1,6 @@
 """Self-managed Chromium through Playwright; same Browser contract as the harness backend."""
 
+import json
 import re
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from .browser import BaseBrowser, StalePage  # noqa: F401  re-export for consume
 class Browser(BaseBrowser):
     def __init__(self, url, *, headless=False, profile=None, wait_idle=False):
         self.wait_idle = wait_idle
+        self._network_log = []
+        self._tracing = False
         self._pw = sync_playwright().start()
         self._browser = None
         self._context = None
@@ -37,6 +40,12 @@ class Browser(BaseBrowser):
             self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780,
                       deviceScaleFactor=1, mobile=False)
             self.call("Emulation.setFocusEmulationEnabled", enabled=True)
+            self.page.on("response", self._record_response)
+            try:
+                self._context.tracing.start(screenshots=True, snapshots=True)
+                self._tracing = True
+            except Exception:
+                self._tracing = False
             self.page.goto(url, wait_until="load", timeout=15000)
         except Exception:
             self.close()
@@ -56,7 +65,40 @@ class Browser(BaseBrowser):
         except Exception:
             pass
 
+    def _record_response(self, response):
+        if len(self._network_log) < 500:
+            self._network_log.append({
+                "url": response.url,
+                "status": response.status,
+                "method": response.request.method,
+            })
+
+    def save_failure_artifacts(self, directory):
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        saved = []
+        if self._tracing:
+            try:
+                self._context.tracing.stop(path=str(directory / "trace.zip"))
+                saved.append(directory / "trace.zip")
+            except Exception:
+                pass
+            self._tracing = False
+        try:
+            (directory / "network.json").write_text(
+                json.dumps({"entries": self._network_log}, indent=2))
+            saved.append(directory / "network.json")
+        except OSError:
+            pass
+        return saved
+
     def close(self):
+        if getattr(self, "_tracing", False):
+            try:
+                self._context.tracing.stop()
+            except Exception:
+                pass
+            self._tracing = False
         for closer in (
             lambda: self._cdp and self._cdp.detach(),
             lambda: self._context and self._context.close(),

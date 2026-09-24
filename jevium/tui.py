@@ -9,7 +9,7 @@ from textual.widgets import Button, Footer, Header, RichLog, Static
 from jevium_core.export_test import render_playwright_test
 
 from . import verifier
-from .cli import summary_lines
+from .cli import _save_failure_artifacts, summary_lines
 from .report import render_report, report_format
 
 _STATUS_LABELS = {
@@ -435,6 +435,13 @@ class JeviumApp(App):
             self.query_one("#log", RichLog).write(acknowledgement)
             event.button.disabled = True
 
+    def _save_artifacts(self) -> None:
+        if self.agent is None:
+            return
+        directory = _save_failure_artifacts(self.agent)
+        if directory is not None:
+            self.query_one("#log", RichLog).write(f"failure artifacts saved to {directory}")
+
     def _fail(self, message: str) -> None:
         status = self.query_one("#status", Static)
         status.update("ERROR")
@@ -442,6 +449,7 @@ class JeviumApp(App):
         self.query_one("#active", Static).update(f"Error: {message}")
         self.query_one("#log", RichLog).write(f"jevium: {message}")
         self.exit_code = 1
+        self._save_artifacts()
         self.exit(1)
 
     def _finish(self, state) -> None:
@@ -457,6 +465,9 @@ class JeviumApp(App):
                 "success": None,
                 "reason": f"run ended {final.get('status')}; not verified.",
             }
+        if self.agent is not None:
+            self.agent.final_state = final
+            self.agent.final_verdict = verdict
         log = self.query_one("#log", RichLog)
         log.write("--- summary ---")
         for line in summary_lines(final, verdict):
@@ -485,6 +496,8 @@ class JeviumApp(App):
             except OSError as exc:
                 log.write(f"jevium: report failed: {exc}")
         self.exit_code = 0 if final.get("status") == "done" else 1
+        if self.exit_code != 0:
+            self._save_artifacts()
         self.exit(self.exit_code)
 
 

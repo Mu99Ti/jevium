@@ -87,6 +87,7 @@ jevium run --url <URL> --task '<goal>' \
 - `--export-test <path.spec.ts>`: write a deterministic Playwright Test from a completed run or replay
 - `--report <path.json|path.xml>`: write a machine-readable run report (JSON or JUnit XML) for CI
 - `--wait-idle`: wait for network idle after each observation (chromium backend only; pairs with the default reduced-motion emulation)
+- Failure runs save `steps.jsonl`, `results.json`, and — with `--backend chromium` — `trace.zip` plus `network.json` under `runs/failure-<timestamp>/` (or the `--record` directory)
 
 Exit codes: `0` done, `1` blocked or failed, `2` usage/config error, `130` interrupt.
 

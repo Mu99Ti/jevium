@@ -1,6 +1,7 @@
 """jevium run — give it a site and a task."""
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -97,8 +98,10 @@ def run_plain(agent, goals, *, max_steps=None, export_path=None, report_path=Non
             print(f"{state.get('elapsed_ms', 0):>5} ms  "
                   f"{_action_count_text(actions)}  {state.get('status')}")
     except (ValueError, RuntimeError) as exc:
+        agent.final_state = final
         print(f"jevium: {exc}", file=sys.stderr)
         return 1
+    agent.final_state = final
     if final is None:
         print("jevium: run produced no state", file=sys.stderr)
         return 1
@@ -106,6 +109,7 @@ def run_plain(agent, goals, *, max_steps=None, export_path=None, report_path=Non
         verdict = verifier.verify(goals, final.get("page") or {}, final.get("history") or [])
     else:
         verdict = {"success": None, "reason": f"run ended {final.get('status')}; not verified."}
+    agent.final_verdict = verdict
     print()
     for line in summary_lines(final, verdict):
         print(line)
@@ -145,6 +149,26 @@ def _start_browser(args, profile):
                                 wait_idle=args.wait_idle)
     from jevium_core.browser import Browser
     return Browser(args.url)
+
+
+def _save_failure_artifacts(agent):
+    if agent is None or not hasattr(agent, "save_failure_artifacts"):
+        return None
+    directory = getattr(agent, "record_dir", None) or (
+        Path("runs") / f"failure-{time.strftime('%Y%m%d-%H%M%S')}")
+    results_json = None
+    state = getattr(agent, "final_state", None)
+    verdict = getattr(agent, "final_verdict", None) or {
+        "success": None, "reason": "run failed before verification", "checks": []}
+    if state is not None:
+        results_json = render_report(state, verdict, "json")
+    try:
+        agent.save_failure_artifacts(directory, results_json=results_json)
+    except Exception as exc:
+        print(f"jevium: failed to save artifacts: {exc}", file=sys.stderr)
+        return None
+    print(f"jevium: failure artifacts saved to {directory}", file=sys.stderr)
+    return directory
 
 
 def main(argv=None) -> int:
@@ -211,6 +235,16 @@ def main(argv=None) -> int:
         except replay.ReplayDrift as exc:
             print(f"jevium: replay drifted at step {exc.index}: {exc.reason} (at {exc.url})",
                   file=sys.stderr)
+            directory = Path("runs") / f"failure-{time.strftime('%Y%m%d-%H%M%S')}"
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                browser.save_failure_artifacts(directory)
+                (directory / "drift.json").write_text(
+                    json.dumps({"step": exc.index, "reason": exc.reason, "url": exc.url},
+                               indent=2) + "\n")
+                print(f"jevium: failure artifacts saved to {directory}", file=sys.stderr)
+            except Exception as save_exc:
+                print(f"jevium: failed to save replay artifacts: {save_exc}", file=sys.stderr)
             return 1
         finally:
             browser.close()
@@ -272,12 +306,17 @@ def main(argv=None) -> int:
 
     try:
         with agent:
-            return run_plain(agent, goals, max_steps=args.max_steps,
+            code = run_plain(agent, goals, max_steps=args.max_steps,
                              export_path=args.export_test, report_path=args.report,
                              start_url=args.url)
+            if code != 0:
+                _save_failure_artifacts(agent)
+            return code
     except KeyboardInterrupt:
         print("\njevium: interrupted.", file=sys.stderr)
+        _save_failure_artifacts(agent)
         return 130
     except ValueError as exc:
         print(f"jevium: {exc}", file=sys.stderr)
+        _save_failure_artifacts(agent)
         return 1

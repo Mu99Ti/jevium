@@ -47,6 +47,8 @@ class Agent:
         except Exception:
             self.browser.close()
             raise
+        self.final_verdict = None
+        self.final_state = None
         self.state = dict(
             browser=self.browser,
             goal="\n".join(plan),
@@ -338,6 +340,36 @@ class Agent:
             **waiting,
             "reason": "Page did not settle after resume. Check the browser, then try again.",
         }
+
+    def save_failure_artifacts(self, directory, results_json=None):
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        paths = []
+        browser_paths = self.state["browser"].save_failure_artifacts(directory)
+        if browser_paths:
+            paths.extend(browser_paths)
+        steps_path = directory / "steps.jsonl"
+        with steps_path.open("w") as fh:
+            for entry in self.state.get("history") or []:
+                fh.write(json.dumps(entry) + "\n")
+        paths.append(steps_path)
+        if results_json is None:
+            verdict = getattr(self, "final_verdict", None) or {
+                "success": None, "reason": "run failed before verification", "checks": []}
+            results_json = json.dumps({
+                "status": self.state.get("status"),
+                "success": verdict.get("success"),
+                "reason": verdict.get("reason"),
+                "checks": verdict.get("checks") or [],
+                "actions": len(self.state.get("history") or []),
+                "elapsed_ms": self.state.get("elapsed_ms", 0),
+                "final_url": (self.state.get("page") or {}).get("url", ""),
+            }, indent=2) + "\n"
+        results_path = directory / "results.json"
+        results_path.write_text(results_json if results_json.endswith("\n")
+                                else results_json + "\n")
+        paths.append(results_path)
+        return paths
 
     def run(self, on_waiting=None):
         while True:
