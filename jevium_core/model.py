@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import sys
 import time
 
 import httpx
@@ -11,6 +12,14 @@ import httpx
 from .questions import HUMAN_INTERVENTION, NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.Client(http2=True, timeout=25)
+
+_VERBOSE = False
+
+
+def set_verbose(enabled):
+    global _VERBOSE
+    _VERBOSE = bool(enabled)
+
 
 SENSITIVE_ENV = {
     "username": "JEVIUM_USERNAME",
@@ -78,16 +87,63 @@ def extract_task_credentials(task):
     return task, None, None
 
 
+def _redact_secrets(text):
+    for kind in SENSITIVE_ENV:
+        value = configured_secret(kind)
+        if not value:
+            continue
+        text = text.replace(value, "***")
+        text = text.replace(json.dumps(value)[1:-1], "***")
+    return text
+
+
+def _trace_request(kind, url, body):
+    print(f"[jevium:{kind} →] {url}", file=sys.stderr)
+    payload = json.dumps(body, indent=2, ensure_ascii=False, default=str)
+    print(_redact_secrets(payload), file=sys.stderr)
+
+
+def _trace_response(kind, status, payload, elapsed_ms):
+    print(f"[jevium:{kind} ←] HTTP{status} in {elapsed_ms} ms", file=sys.stderr)
+    if isinstance(payload, str):
+        dump = payload
+    else:
+        dump = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    print(_redact_secrets(dump), file=sys.stderr)
+
+
+def _trace_retry(kind, detail):
+    print(f"[jevium:{kind} ×] {detail}", file=sys.stderr)
+
+
 def post_json(url, key, body):
+    kind = "jev" if "/v1/systemone" in url else "llm"
+    if _VERBOSE:
+        _trace_request(kind, url, body)
     for attempt in range(3):
+        attempt_started = time.perf_counter()
         try:
             response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            if _VERBOSE:
+                detail = f"{type(exc).__name__} on attempt{attempt + 1}"
+                if attempt < 2:
+                    detail += "; retrying"
+                _trace_retry(kind, detail)
             if attempt == 2:
                 raise RuntimeError("Model connection failed; no action executed.") from None
             time.sleep(0.5 * 2**attempt)
             continue
+        elapsed_ms = round((time.perf_counter() - attempt_started) * 1000)
+        if _VERBOSE:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = response.text
+            _trace_response(kind, response.status_code, payload, elapsed_ms)
         if response.status_code in {429, 529, 503} and attempt < 2:
+            if _VERBOSE:
+                _trace_retry(kind, f"HTTP{response.status_code} on attempt{attempt + 1}; retrying")
             delay = 0.5 * 2**attempt
             try:
                 delay = max(delay, float(response.headers.get("Retry-After", "0")))

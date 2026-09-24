@@ -97,6 +97,94 @@ def test_post_json_honors_retry_after_header(monkeypatch):
     assert sleep.call_args_list == [call(4.0)]
 
 
+def test_verbose_traces_jev_request_and_response(monkeypatch, capsys):
+    monkeypatch.setattr(model, "_VERBOSE", True)
+    response = httpx.Response(200, json={
+        "model": "jev-1.13.0",
+        "answers": {"operation": {"choice": "CLICK",
+                                  "probabilities": {"CLICK": 1.0},
+                                  "confidence": 1.0}},
+        "usage": {"input_tokens": 12, "output_tokens": 3},
+    })
+    monkeypatch.setattr(model.CLIENT, "post", Mock(return_value=response))
+    out = model.post_json("https://api.typesafe.ai/v1/systemone", "sekret-api-key", {
+        "state": "hello world", "model": "jev-latest",
+        "questions": {"operation": {"type": "choice", "criteria": {"CLICK": "click it"}}},
+    })
+    assert out["model"] == "jev-1.13.0"
+    err = capsys.readouterr().err
+    assert "[jevium:jev →] https://api.typesafe.ai/v1/systemone" in err
+    assert "[jevium:jev ←] HTTP200" in err
+    assert '"hello world"' in err
+    assert '"probabilities"' in err
+    assert "sekret-api-key" not in err
+
+
+def test_verbose_traces_llm_chat(monkeypatch, capsys):
+    monkeypatch.setattr(model, "_VERBOSE", True)
+    response = httpx.Response(200, json={
+        "model": "deepseek-chat",
+        "choices": [{"message": {"content": '{"ok":true}'}}],
+    })
+    monkeypatch.setattr(model.CLIENT, "post", Mock(return_value=response))
+    out = model.post_json("https://api.deepseek.com/v1/chat/completions", "llm-key", {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": "split this task"}],
+    })
+    assert out["choices"][0]["message"]["content"] == '{"ok":true}'
+    err = capsys.readouterr().err
+    assert "[jevium:llm →] https://api.deepseek.com/v1/chat/completions" in err
+    assert "[jevium:llm ←] HTTP200" in err
+    assert '"split this task"' in err
+    assert "llm-key" not in err
+
+
+def test_verbose_redacts_configured_secrets(monkeypatch, capsys):
+    monkeypatch.setattr(model, "_VERBOSE", True)
+    monkeypatch.setenv("JEVIUM_PASSWORD", "Sup3r-Hush!")
+    response = httpx.Response(200, json={
+        "choices": [{"message": {"content": "typed Sup3r-Hush! now"}}],
+    })
+    monkeypatch.setattr(model.CLIENT, "post", Mock(return_value=response))
+    model.post_json("https://api.deepseek.com/v1/chat/completions", "k", {
+        "messages": [{"role": "user", "content": "type Sup3r-Hush! now"}],
+    })
+    err = capsys.readouterr().err
+    assert "Sup3r-Hush!" not in err
+    assert "***" in err
+
+
+def test_verbose_off_by_default(monkeypatch, capsys):
+    assert model._VERBOSE is False
+    response = httpx.Response(200, json={"ok": True})
+    monkeypatch.setattr(model.CLIENT, "post", Mock(return_value=response))
+    model.post_json("https://api.typesafe.ai/v1/systemone", "k", {"state": "x"})
+    assert "[jevium:" not in capsys.readouterr().err
+
+
+def test_verbose_traces_retry(monkeypatch, capsys):
+    monkeypatch.setattr(model, "_VERBOSE", True)
+    monkeypatch.setattr(model.time, "sleep", lambda _seconds: None)
+    limited = httpx.Response(429, json={"error": "rate limited"})
+    ok = httpx.Response(200, json={"ok": True})
+    monkeypatch.setattr(model.CLIENT, "post", Mock(side_effect=[limited, ok]))
+    assert model.post_json("https://api.typesafe.ai/v1/systemone", "k",
+                           {"state": "x"}) == {"ok": True}
+    err = capsys.readouterr().err
+    assert "[jevium:jev ←] HTTP429" in err
+    assert '"rate limited"' in err
+    assert "[jevium:jev ×] HTTP429 on attempt1; retrying" in err
+    assert err.count("[jevium:jev ←] HTTP200") == 1
+
+
+def test_set_verbose_toggles(monkeypatch):
+    monkeypatch.setattr(model, "_VERBOSE", False)
+    model.set_verbose(True)
+    assert model._VERBOSE is True
+    model.set_verbose(False)
+    assert model._VERBOSE is False
+
+
 def test_loading_only_page_waits_without_model_call(monkeypatch):
     monkeypatch.setenv("TYPESAFE_API_KEY", "test")
     post = Mock(side_effect=AssertionError("loading-only page must not call the model"))

@@ -477,6 +477,23 @@ def test_harness_rejects_wait_idle(monkeypatch, capsys):
     assert "--wait-idle require --backend chromium" in capsys.readouterr().err
 
 
+def test_verbose_flag_enables_model_trace(monkeypatch):
+    fresh_env(monkeypatch)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    spy = Mock()
+    monkeypatch.setattr(cli, "set_verbose", spy)
+    monkeypatch.setattr(cli, "Agent", FakeAgent)
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t", "--plain"])
+    assert code == 0
+    spy.assert_not_called()
+    for flag in ("--verbose", "-v"):
+        spy.reset_mock()
+        code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                         "--plain", flag])
+        assert code == 0
+        spy.assert_called_once_with(True)
+
+
 def test_plain_failure_saves_artifacts(monkeypatch, tmp_path, capsys):
     fresh_env(monkeypatch)
     monkeypatch.setenv("TYPESAFE_API_KEY", "k")

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from jevium_core import Agent, replay
 from jevium_core.export_test import render_playwright_test
-from jevium_core.model import extract_task_credentials, task_contains_configured_secret
+from jevium_core.model import extract_task_credentials, set_verbose, task_contains_configured_secret
 
 from . import planner, verifier
 from .report import render_report, report_format
@@ -55,6 +55,8 @@ def parse_args(argv=None):
                      help="Write a JSON or JUnit XML run report (CI).")
     run.add_argument("--wait-idle", action="store_true",
                      help="Wait for network idle after each observation (chromium only).")
+    run.add_argument("-v", "--verbose", action="store_true",
+                     help="Print every Jev/text-model request and response to stderr.")
     return p.parse_args(argv)
 
 
@@ -178,6 +180,9 @@ def main(argv=None) -> int:
     except SystemExit as exc:
         # argparse: --help exits 0 (must stay 0), errors exit 2.
         return int(exc.code) if exc.code is not None else 2
+
+    if args.verbose:
+        set_verbose(True)
 
     if not args.replay and not os.environ.get("TYPESAFE_API_KEY"):
         print("jevium: TYPESAFE_API_KEY is required.", file=sys.stderr)

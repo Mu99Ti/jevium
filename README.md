@@ -75,7 +75,7 @@ Configure login and card values in git-ignored `.env` (`JEVIUM_USERNAME`, `JEVIU
 jevium run --url <URL> --task '<goal>' \
   [--plain] [--headless] [--profile <name>] [--record] \
   [--backend chromium|harness] [--max-steps N] [--wait-idle] \
-  [--replay <steps.jsonl>] [--export-test <path.spec.ts>] [--report <path.json|path.xml>]
+  [--replay <steps.jsonl>] [--export-test <path.spec.ts>] [--report <path.json|path.xml>] [--verbose]
 ```
 
 - `--plain`: line logs instead of the TUI
@@ -88,9 +88,28 @@ jevium run --url <URL> --task '<goal>' \
 - `--export-test <path.spec.ts>`: write a deterministic Playwright Test from a completed run or replay
 - `--report <path.json|path.xml>`: write a machine-readable run report (JSON or JUnit XML) for CI
 - `--wait-idle`: wait for network idle after each observation (chromium backend only; pairs with the default reduced-motion emulation)
+- `-v`/`--verbose`: print every Jev and text-model request/response to stderr (use with `--plain`, or `2>trace.log` to capture without disturbing the TUI)
 - Failure runs save `steps.jsonl`, `results.json`, and — with `--backend chromium` — `trace.zip` plus `network.json` under `runs/failure-<timestamp>/` (or the `--record` directory)
 
 Exit codes: `0` done, `1` blocked or failed, `2` usage/config error, `130` interrupt.
+
+Trace every Jev and text-LLM exchange on stderr with `-v` (planner, verifier, and `TYPE_TEXT` included):
+
+```bash
+uv run jevium run --plain -v --url https://example.com --task 'Open the More information link'
+```
+
+```text
+[jevium:jev →] https://api.typesafe.ai/v1/systemone
+… request JSON: state + questions …
+[jevium:jev ←] HTTP200 in 231 ms
+… response JSON: answers, probabilities, usage …
+[jevium:llm →] https://api.deepseek.com/v1/chat/completions
+[jevium:llm ←] HTTP200 in 410 ms
+[jevium:jev ×] HTTP429 on attempt1; retrying
+```
+
+API keys are never printed; configured `JEVIUM_*` secrets are replaced with `***` in both directions.
 
 ## E2E testing
 
