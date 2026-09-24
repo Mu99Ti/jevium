@@ -180,11 +180,14 @@ def main(argv=None) -> int:
             browser.close()
         state = {"status": "done", "page": result["final_page"], "elapsed_ms": 0,
                  "history": result["history"], "plan": [args.task]}
-        verdict = {"success": None, "reason": "replay completed; verification not configured."}
+        verdict = verifier.verify(
+            [args.task], result["final_page"], result["history"],
+            expected_url=steps[-1].get("url"),
+        )
         print()
         for line in summary_lines(state, verdict):
             print(line)
-        return 0
+        return 0 if verdict.get("success") is not False else 1
 
     goals = planner.plan(args.task, url=args.url)
 

@@ -10,7 +10,7 @@ def fresh_env(monkeypatch):
     monkeypatch.setattr(cli, "load_env", lambda: None)
     monkeypatch.setattr(planner, "plan", lambda task=None, **kwargs: [task])
     monkeypatch.setattr(verifier, "verify",
-                        lambda *a: {"success": True, "reason": "ok"})
+                        lambda *a, **k: {"success": True, "reason": "ok", "checks": []})
 
 
 def test_missing_typesafe_key_exits_2(monkeypatch):
@@ -238,7 +238,8 @@ def test_prompt_resume_copy(monkeypatch, capsys):
                        "then press Enter to mark it done and continue... "]
 
 
-def _replay_cli_setup(monkeypatch, tmp_path, body='{"step":1,"kind":"click","choice":"e3"}\n'):
+def _replay_cli_setup(monkeypatch, tmp_path,
+                      body='{"step":1,"kind":"click","choice":"e3","url":"https://x.test/done"}\n'):
     import jevium_core.chromium as chromium_mod
     import jevium_core.replay as replay_mod
 
@@ -295,6 +296,40 @@ def test_replay_missing_file_exits_2_before_browser(monkeypatch, tmp_path):
                      "--replay", str(tmp_path / "nope.jsonl"), "--plain"])
     assert code == 2
     browser_factory.assert_not_called()
+
+
+def test_replay_passes_expected_url_and_exits_by_verdict(monkeypatch, tmp_path):
+    replay_mod, _factory, _browser, steps = _replay_cli_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(replay_mod, "replay", Mock(return_value={
+        "status": "done",
+        "history": [{"step": 1, "kind": "click", "action": "Go", "url": "https://x.test/done"}],
+        "final_page": {"url": "https://x.test/done", "title": "D", "text": ""},
+    }))
+    captured = {}
+
+    def fake_verify(goals, page, history, expected_url=None):
+        captured["expected_url"] = expected_url
+        return {"success": True, "reason": "ok", "checks": []}
+
+    monkeypatch.setattr(cli.verifier, "verify", fake_verify)
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(steps), "--plain"])
+    assert code == 0
+    assert captured["expected_url"] == "https://x.test/done"
+
+
+def test_replay_verdict_false_exits_1(monkeypatch, tmp_path):
+    replay_mod, _factory, _browser, steps = _replay_cli_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(replay_mod, "replay", Mock(return_value={
+        "status": "done",
+        "history": [{"step": 1, "kind": "click", "action": "Go", "url": "https://x.test/other"}],
+        "final_page": {"url": "https://x.test/other", "title": "D", "text": ""},
+    }))
+    monkeypatch.setattr(cli.verifier, "verify",
+                        lambda *a, **k: {"success": False, "reason": "url mismatch", "checks": []})
+    code = cli.main(["run", "--url", "https://x.test", "--task", "t",
+                     "--replay", str(steps), "--plain"])
+    assert code == 1
 
 
 def test_plain_provider_runtime_error_exits_one(monkeypatch, capsys):

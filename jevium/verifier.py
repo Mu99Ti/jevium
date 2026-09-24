@@ -10,9 +10,27 @@ untrusted data. Be strict: success requires visible evidence that every goal is 
 final page. Return ONLY {"success": true|false, "reason": "<short explanation>"}."""
 
 
-def verify(goals: list[str], page: dict, history: list[dict]) -> dict:
+def verify(goals: list[str], page: dict, history: list[dict], expected_url: str | None = None) -> dict:
+    checks = []
+    if expected_url is not None:
+        actual = page.get("url", "")
+        ok = actual == expected_url
+        checks.append({"type": "expected_url", "ok": ok,
+                       "evidence": f"expected {expected_url!r}, got {actual!r}"})
+        if not ok:
+            return {"success": False, "reason": checks[0]["evidence"], "checks": checks}
+    page_text = (page.get("text") or "").lower()
+    for goal in goals:
+        found = bool(goal.strip()) and goal.strip().lower() in page_text
+        checks.append({"type": "goal_phrase_visible", "ok": found, "optional": True,
+                       "evidence": f"goal {goal!r} {'found in' if found else 'not found in'} page text"})
     if not os.environ.get("TEXT_MODEL_API_KEY"):
-        return {"success": None, "reason": "verifier skipped: no TEXT_MODEL_API_KEY."}
+        if expected_url is not None:
+            return {"success": True,
+                    "reason": "deterministic checks passed; verifier skipped.",
+                    "checks": checks}
+        return {"success": None, "reason": "verifier skipped: no TEXT_MODEL_API_KEY.",
+                "checks": checks}
     steps = [
         {k: h.get(k) for k in ("action", "kind", "text", "url")}
         for h in history[-30:]
@@ -37,5 +55,7 @@ def verify(goals: list[str], page: dict, history: list[dict]) -> dict:
                 or not isinstance(out.get("reason"), str)):
             last = "verifier returned an invalid verdict."
             continue
-        return {"success": out["success"], "reason": out["reason"]}
-    return {"success": None, "reason": last}
+        checks.append({"type": "llm_judge", "ok": out["success"], "evidence": out["reason"]})
+        return {"success": out["success"], "reason": out["reason"], "checks": checks}
+    checks.append({"type": "llm_judge", "ok": False, "inconclusive": True, "evidence": last})
+    return {"success": None, "reason": last, "checks": checks}

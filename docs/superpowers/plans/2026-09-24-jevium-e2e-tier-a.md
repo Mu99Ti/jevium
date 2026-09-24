@@ -675,7 +675,7 @@ Expected: push succeeds; `git status --porcelain=v1` shows only this plan file m
 **Interfaces:**
 - Produces: `verifier.verify(goals: list[str], page: dict, history: list[dict], expected_url: str | None = None) -> {"success": bool | None, "reason": str, "checks": list[dict]}`. Check entries are `{"type", "ok", "evidence"}` plus `"optional": true` for `goal_phrase_visible` and `"inconclusive": true` for an unanswerable LLM judge. Replay exits 1 iff `success is False`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/test_verifier.py`: add `from unittest.mock import Mock` next to `import json`.
 
@@ -780,13 +780,13 @@ def test_replay_verdict_false_exits_1(monkeypatch, tmp_path):
     assert code == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest -q tests/test_verifier.py tests/test_cli.py -k "expected_url or goal_phrase or llm_false or failure_is_unknown or strict_verdict or retries_once or replay_passes or replay_verdict" -v`
 
 Expected: FAIL — `KeyError: 'checks'` on the new verifier assertions (old return shape), and `expected_url` capture is `None` / exit-code mismatch because the replay branch does not pass or honor the verdict yet.
 
-- [ ] **Step 3: Implement structured verdicts**
+- [x] **Step 3: Implement structured verdicts**
 
 Replace the entire body of `verifier.verify` in `jevium/verifier.py` (keep `SYSTEM` and imports unchanged):
 
@@ -857,13 +857,13 @@ In `jevium/cli.py`'s replay branch, replace the hardcoded verdict block with:
 
 (`state` stays exactly as Task1 built it.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run ruff check . && uv run pytest -q`
 
 Expected: full suite green (verdict shape tests, replay exit tests, unchanged non-replay callers, fresh_env verifier stubs still compatible).
 
-- [ ] **Step 5: Tick Task2 checkboxes, commit, push**
+- [x] **Step 5: Tick Task2 checkboxes, commit, push**
 
 ```bash
 git add jevium/verifier.py jevium/cli.py tests/test_verifier.py tests/test_cli.py
